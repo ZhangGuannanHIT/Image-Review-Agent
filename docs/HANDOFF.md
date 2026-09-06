@@ -86,7 +86,3 @@ python run_backend.py
 ## Git 协作口径
 
 仓库只提交代码、测试、文档和无密钥配置模板。`fg_clip/`、checkpoint、数据、阶段性标注 JSON、测试图片、真实密钥配置、虚拟环境和日志全部忽略。任何真实密钥一旦进入 Git 历史必须立即轮换，不能只靠后续删除文件解决。
-
-## 环境提醒
-
-项目目录 `.venv` 是 Python 3.12、PyTorch CUDA 12.8 环境，已经识别 RTX 5060 Ti 并完成真实基模推理。不要误用系统 WindowsApps Python 或父目录 CPU 环境。

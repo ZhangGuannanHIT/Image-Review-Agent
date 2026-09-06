@@ -72,8 +72,6 @@ src/
 
 ## 运行环境
 
-项目内已经建立 `.venv`：Python 3.12 + CUDA 12.8 PyTorch，已验证可识别 RTX 5060 Ti（`sm_120`）并完成 FG-CLIP2 原始权重前向。不要使用系统的 WindowsApps `python.exe` 或父目录 CPU 环境。
-
 安装依赖：
 
 ```powershell

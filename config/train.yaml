@@ -1,0 +1,37 @@
+# 训练超参配置（M3 阶段使用；当前占位）
+# 训练实际执行需等：标注全部完成 + 图片路径 + 有效 GPU 环境（torch cu128）
+
+model_path: "fg_clip"          # 原始权重目录
+device: "cuda"
+seed: 42
+data:
+  json_path: ""                # ★ 最终版 Label Studio JSON 路径
+  image_root: ""               # ★ 图片本地根目录（JSON file_upload 对应）
+  split: [0.85, 0.10, 0.05]    # train / val / test
+  stratify_key: "risk"
+  split_path: "data/split.json"
+
+lora:
+  enabled: true
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "out_proj"]
+
+optim:
+  lr_lora: 1.0e-4
+  lr_head: 1.0e-3
+  weight_decay: 0.01
+  batch_size: 16
+  grad_accum: 1
+  epochs: 20          # 实际由早停决定
+  patience: 5
+  amp: true           # fp16
+
+loss:
+  label_smoothing: 0.05
+  focal_gamma: 0.0    # >0 启用 Focal（仅 risk 头）
+  max_weight_clip: 10.0
+
+output_dir: "checkpoints"
+eval_dir: "eval_results"

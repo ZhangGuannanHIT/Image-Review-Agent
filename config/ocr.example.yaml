@@ -1,0 +1,11 @@
+# 复制为 config/ocr.yaml 后填写，或使用环境变量 OCR_API_KEY。
+glm_ocr:
+  provider: "glm_ocr"
+  model: "glm-ocr"
+  endpoint: "https://open.bigmodel.cn/api/paas/v4/layout_parsing"
+  api_key: ""
+  timeout: 20
+  max_image_mb: 10
+  return_crop_images: false
+  need_layout_visualization: false
+

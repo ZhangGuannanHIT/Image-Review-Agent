@@ -1,0 +1,33 @@
+# 后端运行配置。OCR 与裁决 LLM 的模型信息分别放在独立配置文件中。
+# ★ 敏感信息（api_key）勿提交仓库，实际使用环境变量覆盖。
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  max_image_mb: 10
+
+runtime:
+  mode: "real"          # 当前进行真实基模全流程联调
+
+ocr_config_path: "config/ocr.yaml"
+llm_config_path: "config/llm.yaml"
+
+model:
+  path: "fg_clip"
+  ckpt_dir: "checkpoints/best"
+  device: "cuda"
+  lora: false                 # 未训练联调只加载 FG-CLIP2 原始视觉权重
+  require_checkpoint: false  # 分类头随机初始化，结果仅用于验证流程
+
+features:
+  ocr_enabled: true
+  lowlevel_enabled: true
+  rag_enabled: false          # RAG 尚未实现，本轮不注册该工具
+
+# ReAct agent 配置（LLM 为核心）
+agent:
+  max_rounds: 5
+  on_tool_fail: "skip"   # 可选工具失败: skip | abort
+
+log_dir: "backend/logs"
+

@@ -1,0 +1,34 @@
+# FG-CLIP2 违规审核系统 —— 依赖清单
+# ★ torch 需满足：PyTorch >= 2.7 + CUDA 12.8（Blackwell sm_120）
+#   仅 Python 3.10-3.12 有对应 cu128 wheel；请用此类 Python 建 venv。
+
+# 核心
+torch>=2.7.0            # 用 cu128 wheel 安装：uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+torchvision>=0.18.0
+transformers>=4.40.0
+safetensors
+accelerate
+
+# LoRA / 训练
+peft
+matplotlib             # 混淆矩阵图（评估可视化）
+
+# 后端
+fastapi>=0.100
+uvicorn
+python-multipart       # 文件上传
+pydantic>=2
+requests               # 外接 OCR API
+
+# LLM Agent（LangChain / LangGraph）
+langchain>=0.2.0
+langchain-openai>=0.1.0   # OpenAI 兼容 ChatModel
+langgraph>=0.2.0          # ReAct agent
+langchain-core
+
+# 数据处理
+Pillow
+PyYAML
+opencv-python          # 低层像素特征兜底（lowlevel.py）
+
+# 说明：ocr/paddleocr、rag/faiss-chroma 等按需后期加，本期 RAG 仅占位、OCR 走外接 API。

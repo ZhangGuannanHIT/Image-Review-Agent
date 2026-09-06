@@ -1,0 +1,13 @@
+# 单图推理配置。正式审核仍以 backend/config.yaml 为启动入口。
+model_path: "fg_clip"
+ckpt_dir: "checkpoints/best"
+device: "cuda"
+lora: true
+strict_load: true
+
+# 多标签阈值最终需在验证集上标定，当前统一使用 0.5。
+type_thresholds:
+  "无暴力": 0.5
+  "直接暴力（攻击进行中）": 0.5
+  "后果展示（尸体/伤口）": 0.5
+  "暗示/威胁（武器指向/捆绑）": 0.5

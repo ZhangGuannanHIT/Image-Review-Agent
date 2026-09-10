@@ -5,7 +5,7 @@
 项目采用 FG-CLIP2 + LLM ReAct Agent。CLIP、OCR、RAG 和低层像素分析都是 Agent Tools：
 
 - `analyze_image` 必须成功调用，调用守卫拒绝无 CLIP 证据的最终提交；
-- GLM-OCR、低层特征是可选工具，RAG 当前硬关闭；
+- GLM-OCR、低层特征和本地规则判例 RAG 是可选工具；
 - LLM 不直接看图；
 - API 只返回 `id` 和 `suggestion`。
 
@@ -36,12 +36,12 @@
 - 实现 Mock Engine/LLM/OCR；
 - 固定并完成智谱 GLM-OCR 的 JSON+Base64 接口适配；
 - 固定并完成 DeepSeek-V4-Flash 独立配置与 LangChain 适配；
-- 增加工具级 RAG 禁用开关；
+- 实现工具级 RAG 开关及本地轻量规则判例检索；
 - 建立项目内 Python 3.12 + CUDA 12.8 环境并验证 RTX 5060 Ti；
 - 使用 `knife_man.jpg` 完成 FG-CLIP2 原始权重真实前向；
 - 使用 DeepSeek-V4-Flash 完成真实 Agent 全流程，轨迹为 `analyze_image → analyze_lowlevel → finalize_review`；
 - 修正 GLM-OCR Base64 data URI 并完成真实接口测试；
-- 自动化测试 15 项全部通过；
+- 自动化测试覆盖模型、Agent守卫、API、RAG、DeepSeek配置与GLM-OCR；
 - 冻结前端接口仍为正常/降级 `{id, suggestion}`、HTTP 错误 `{code, message, id}`；
 - 更新 `.gitignore`，排除整个模型目录、权重、标注导出、数据、密钥和运行产物；
 - 修复 API 图片校验和错误结构；
@@ -59,20 +59,19 @@
 7. 在验证集标定 violence type 阈值；
 8. 在独立测试集生成正式指标；
 9. 为前端联调补充跨域代理或明确部署为同源；
-10. 如结题需要，再实现 RAG 判例库；
+10. 继续补充并复核 RAG 规则、来源和脱敏判例；
 11. 正式上线前增加请求级总超时和明确的 504 语义。
 
 ## 运行
 
-当前配置为真实基模联调：
+仓库默认使用 Mock 模式，可直接启动前端与接口联调：
 
 ```bash
 .\.venv\Scripts\Activate.ps1
-$env:LLM_API_KEY="你的 DeepSeek API Key"
 python run_backend.py
 ```
 
-当前 `require_checkpoint=false`，允许随机任务头验证链路，但结果不能作为模型效果。正式训练完成后必须改回 `lora=true`、`require_checkpoint=true` 并指定 checkpoint。
+正式审核需将 `runtime.mode` 切换为 `real`，提供 DeepSeek 与 GLM-OCR 密钥，并保持 `lora=true`、`require_checkpoint=true`，加载已训练 checkpoint。
 
 ## API 联调口径
 
@@ -80,7 +79,7 @@ python run_backend.py
 - 图片/字段错误返回 HTTP 400 `{code, message, id}`；服务未初始化返回 503；
 - 当前没有请求级总超时和 504，前端超时暂建议 120 秒；
 - `/health.mock=false` 仅代表真实视觉引擎，不代表分类头已经训练；
-- RAG 当前未注册给 Agent；
+- RAG 已启用，使用 `knowledge/knowledge.json` 与标准库字符 n-gram TF-IDF 检索；
 - 完整细节以 `docs/api.md` 为准。
 
 ## Git 协作口径

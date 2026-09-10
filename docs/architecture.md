@@ -21,7 +21,7 @@ flowchart TD
     TOOLS --> CLIP[analyze_image / ReviewEngine]
     TOOLS --> OCR[ocr_image / GLM-OCR]
     TOOLS --> LOW[analyze_lowlevel / OpenCV]
-    TOOLS -. 当前关闭 .-> RAG[search_knowledge / Retriever]
+    TOOLS --> RAG[search_knowledge / 本地文本检索]
     TOOLS --> FINAL[finalize_review]
     CLIP --> MODEL[FG-CLIP2 + 可选 LoRA + 四任务头]
     GRAPH --> LOG[JSONL 轨迹日志]
@@ -38,7 +38,7 @@ flowchart TD
 | `analyze_image`    |     必须 | FG-CLIP2 输出四字段基础视觉证据                    |
 | `ocr_image`        |     可选 | 调用智谱 GLM-OCR，提取广告、字幕、标语、水印等文字 |
 | `analyze_lowlevel` |     可选 | 提供红色、模糊、边缘、细密纹理、信息熵提示         |
-| `search_knowledge` | 当前关闭 | RAG 实现后用于检索规则或相似判例                   |
+| `search_knowledge` |     可选 | 检索本地审核规则、脱敏判例和 OCR 语义边界         |
 | `finalize_review`  | 最终动作 | 提交一句审核建议                                   |
 
 ### 3.2 调用守卫
@@ -86,7 +86,7 @@ degraded             是否降级
 3. Agent 开始 ReAct
 4. Agent 调用 analyze_image
 5. ReviewEngine 读取图片并返回四任务结果
-6. Agent 根据证据选择 GLM-OCR 或低层分析；本轮不注册 RAG
+6. Agent 根据证据选择 GLM-OCR、低层分析或本地 RAG
 7. Agent 调用 finalize_review
 8. 调用守卫检查 clip_succeeded
 9. Service 写入工具轨迹和结构化证据
@@ -175,7 +175,7 @@ Mock 结果必须标记，不用于正式指标。
 
 ### Real
 
-真实模式加载 FG-CLIP2 与 DeepSeek 裁决模型。当前联调配置为 `lora=false`、`require_checkpoint=false`，因此使用原始视觉权重和随机初始化任务头，输出携带 `trained=false`，只能验证流程。训练完成后应恢复 LoRA 并强制 checkpoint。
+真实模式加载 FG-CLIP2、已训练的 LoRA adapter、分类头 checkpoint 与 DeepSeek 裁决模型。仓库默认使用 Mock 模式；切换到 real 时配置要求 `lora=true`、`require_checkpoint=true`，禁止随机分类头给出审核结论。
 
 ## 10. GLM-OCR 工具架构
 
@@ -232,7 +232,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 受控 StateGraph + CLIP 调用守卫
 ```
 
-当前 `features.rag_enabled=false` 同时作用于工具注册和系统提示词，确保 Agent 无法实际调用尚未实现的 RAG。后续 RAG 推荐使用“FG-CLIP 图像向量 + 四任务结构化摘要 + 可选 OCR 文字”的混合检索，不要求 FG-CLIP 生成其不具备的自然语言图像描述。
+当前 `features.rag_enabled=true` 会向 Agent 注册 `search_knowledge`。知识保存在 `knowledge/knowledge.json`，包含15条原子规则、4条脱敏核验案例和1条教学案例；检索使用纯标准库字符 2～4 gram TF-IDF 与余弦 Top-K，分别计算标题、同义词标签和规则正文的相关度，再取条目内最高分。`negative_example` 随结果提供给 Agent 判断规则边界，但不作为正向检索文本。阈值 `0.30` 在当前55条校准查询上取得 Top-1 `44/45`、查询级 HitRate@3 `45/45`、噪声拒绝 `10/10`，边界冲突 `1/15`；提高到 `0.31` 后 HitRate@3 降为 `44/45`。这些是参与调参的校准结果，不代表独立泛化性能。检索不依赖图片向量或 FG-CLIP 生成自然语言描述，分数仅表示文本相关度，不是违规概率；规则优先于判例，教学案例不能单独作为权威判罚依据。
 
 ## 12. 故障行为
 
@@ -263,7 +263,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 - Mock 端到端流程；
 - GLM-OCR JSON+Base64 请求与版面结果适配；
 - DeepSeek-V4-Flash 独立配置与 LangChain 适配；
-- RAG 工具硬关闭开关；
+- RAG 工具开关及本地轻量规则判例检索；
 - Python 3.12 + CUDA 12.8 项目虚拟环境与真实基模前向验证；
 - DeepSeek-V4-Flash 真实 Agent 全链路验证；
 - GLM-OCR Base64 data URI 真实接口验证；
@@ -277,13 +277,13 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 - 示例链路成功执行 `analyze_image → analyze_lowlevel → finalize_review`；
 - CLIP 调用守卫通过，Agent 正常收敛且未降级；
 - OCR 独立真实调用成功；
-- 自动化测试 15 项通过。
+- 自动化测试覆盖模型头、损失、Agent守卫、API、RAG、DeepSeek配置与GLM-OCR。
 
 仍依赖外部条件：
 
 - 最终标注 JSON 与完整图片目录；
 - 正式训练 checkpoint；
-- RAG 判例库。
+- 继续补充并复核 RAG 规则来源和脱敏判例。
 
 ## 14. 仓库与敏感信息边界
 

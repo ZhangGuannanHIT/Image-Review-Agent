@@ -3,11 +3,16 @@
 import base64
 import io
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from PIL import Image
 
 from backend.ocr import GLMOCRConfig, OCRClient
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OCR_EXAMPLE = ROOT / "config" / "ocr.example.yaml"
 
 
 def png_bytes() -> bytes:
@@ -18,7 +23,7 @@ def png_bytes() -> bytes:
 
 class GLMOCRTests(unittest.TestCase):
     def test_config_is_glm_ocr(self):
-        config = GLMOCRConfig.from_yaml("config/ocr.yaml")
+        config = GLMOCRConfig.from_yaml(str(OCR_EXAMPLE))
         self.assertEqual(config.provider, "glm_ocr")
         self.assertEqual(config.model, "glm-ocr")
 

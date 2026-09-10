@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="基于 FG-CLIP2、GLM-OCR、RAG 与 DeepSeek Agent 的图片内容辅助审核系统">
+  <title>ImageGuard｜智能图片审核</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#reviewWorkspace">跳到审核工作台</a>
+
+  <div id="modeBanner" class="mode-banner" hidden>
+    <div class="shell mode-banner__inner">
+      <strong id="modeBannerTitle">本地界面预览</strong>
+      <span id="modeBannerText">当前为离线预览，可体验选图与页面交互。启动后端后请访问 http://localhost:8000/ 进行审核。</span>
+      <button id="copyAddressButton" class="banner-action" type="button">复制访问地址</button>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="shell topbar__inner">
+      <a class="brand" href="./" aria-label="ImageGuard 首页">
+        <span class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M16 3 5.5 7.2v7.4c0 6.4 4.3 11.9 10.5 13.6 6.2-1.7 10.5-7.2 10.5-13.6V7.2L16 3Z"/><path d="m10.8 15.9 3.3 3.2 7.3-7.5"/></svg>
+        </span>
+        <span class="brand__text"><strong>ImageGuard</strong><small>多模态图片内容审核</small></span>
+      </a>
+
+      <div class="topbar__right">
+        <div id="servicePill" class="service-pill service-pill--checking" role="status" aria-live="polite">
+          <span class="service-pill__dot" aria-hidden="true"></span>
+          <span id="serviceText">正在连接审核服务</span>
+          <button id="healthRetryButton" class="inline-action" type="button" hidden>重试</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero shell" aria-labelledby="heroTitle">
+      <div class="hero__copy">
+        <span class="hero__kicker">MULTIMODAL AI REVIEW SYSTEM</span>
+        <h1 id="heroTitle">让图片内容审核<br><em>清晰、快速、可追溯</em></h1>
+        <p>以 FG-CLIP2 为视觉基础，结合 GLM-OCR、本地规则判例库与 DeepSeek Agent，为运营人员生成直观的辅助审核建议。</p>
+        <div class="capability-row" aria-label="系统能力">
+          <span><b>01</b> 视觉证据</span>
+          <i aria-hidden="true"></i>
+          <span><b>02</b> 按需取证</span>
+          <i aria-hidden="true"></i>
+          <span><b>03</b> 综合建议</span>
+        </div>
+      </div>
+
+      <div class="hero__visual" aria-hidden="true">
+        <div class="visual-orbit visual-orbit--outer"></div>
+        <div class="visual-orbit visual-orbit--inner"></div>
+        <div class="visual-core">
+          <svg viewBox="0 0 64 64"><path d="M32 7 12 15v14c0 12.2 8.2 22.6 20 26 11.8-3.4 20-13.8 20-26V15L32 7Z"/><path d="m22 32 6.2 6L42 24"/></svg>
+          <strong>AI AGENT</strong><span>受控工具调用</span>
+        </div>
+        <span class="orbit-chip orbit-chip--vision">FG-CLIP2</span>
+        <span class="orbit-chip orbit-chip--ocr">GLM-OCR</span>
+        <span class="orbit-chip orbit-chip--rag">RAG</span>
+      </div>
+    </section>
+
+    <section id="reviewWorkspace" class="workspace-section" aria-labelledby="workspaceTitle">
+      <div class="shell">
+        <div class="section-heading">
+          <div><span>在线体验</span><h2 id="workspaceTitle">图片审核工作台</h2></div>
+          <p>支持 JPG、PNG、WEBP · 单张不超过 10MB</p>
+        </div>
+
+        <div class="review-board">
+          <section class="upload-pane" aria-labelledby="uploadTitle">
+            <div class="pane-heading">
+              <span class="pane-number">01</span>
+              <div><h3 id="uploadTitle">选择待审核图片</h3><p>图片只在提交后发送至审核后端</p></div>
+            </div>
+
+            <input id="fileInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp">
+            <button id="dropZone" class="drop-zone" type="button" aria-describedby="fileHelp">
+              <span id="emptyUpload" class="empty-upload">
+                <span class="empty-upload__icon" aria-hidden="true">
+                  <svg viewBox="0 0 48 48"><rect x="5" y="8" width="38" height="32" rx="6"/><circle cx="17" cy="19" r="4"/><path d="m9 35 10-10 7 7 5-5 8 8"/><path d="M35 5v10m-5-5h10"/></svg>
+                </span>
+                <strong>拖拽图片至此，或点击选择</strong>
+                <span>上传后将由多模态 Agent 进行综合分析</span>
+                <span class="choose-button">浏览本地图片</span>
+              </span>
+              <span id="previewWrap" class="preview-wrap" hidden>
+                <img id="imagePreview" alt="待审核图片预览">
+                <span class="preview-shade"><b>待审核图片</b><small>点击可重新选择</small></span>
+              </span>
+            </button>
+
+            <p id="fileHelp" class="file-help">建议使用内容清晰、来源合规的测试图片。</p>
+            <div id="localError" class="notice notice--error" role="alert" hidden></div>
+
+            <div id="fileInfo" class="file-info" hidden>
+              <span class="file-info__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+              </span>
+              <div class="file-info__copy"><strong id="fileName"></strong><span id="fileMeta"></span></div>
+              <button id="removeButton" class="icon-button" type="button" aria-label="移除所选图片">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>
+              </button>
+            </div>
+
+            <button id="reviewButton" class="primary-button" type="button" disabled>
+              <span id="reviewButtonIcon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.3c0 4.6 3.1 8.5 7.5 9.7 4.4-1.2 7.5-5.1 7.5-9.7V6L12 3Z"/><path d="m8.7 12.2 2.1 2.1 4.6-4.8"/></svg>
+              </span>
+              <span id="reviewButtonText">请选择图片</span>
+            </button>
+          </section>
+
+          <section id="resultPane" class="result-pane" aria-labelledby="resultTitle" aria-busy="false">
+            <div class="pane-heading">
+              <span class="pane-number pane-number--cyan">02</span>
+              <div><h3 id="resultTitle" tabindex="-1">审核建议报告</h3><p>结果仅作辅助参考，重要结论需人工复核</p></div>
+              <span id="resultModeBadge" class="mode-badge" hidden>MOCK</span>
+            </div>
+
+            <div id="emptyResult" class="result-view result-view--empty">
+              <div class="empty-report" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <svg viewBox="0 0 48 48"><path d="M8 6h23l9 9v27H8z"/><path d="M31 6v10h10M15 24h18M15 31h13"/><circle cx="35" cy="35" r="8"/><path d="m31.8 35 2.2 2.2 4.2-4.4"/></svg>
+              </div>
+              <h4>报告将在这里生成</h4>
+              <p>选择左侧图片并开始审核，系统将返回一条面向运营人员的处理建议。</p>
+              <ul><li>审核结果</li><li>处置建议</li><li>可追溯编号</li></ul>
+            </div>
+
+            <div id="loadingResult" class="result-view result-view--loading" hidden>
+              <div class="scan-visual" aria-hidden="true">
+                <span class="scan-visual__frame"></span><span class="scan-visual__line"></span>
+                <svg viewBox="0 0 48 48"><path d="M8 6h23l9 9v27H8z"/><path d="M31 6v10h10M15 24h18M15 31h13"/></svg>
+              </div>
+              <span class="loading-label">AGENT RUNNING</span>
+              <h4>正在生成审核建议</h4>
+              <p id="loadingAnnouncement" role="status" aria-live="polite">图片已上传，审核服务正在处理中。</p>
+              <span id="elapsedTime" class="elapsed-time" aria-hidden="true">00:00</span>
+              <button id="cancelButton" class="secondary-button" type="button">取消等待</button>
+            </div>
+
+            <div id="successResult" class="result-view result-view--success" hidden>
+              <div class="result-status-row">
+                <span id="resultIcon" class="result-icon" aria-hidden="true"></span>
+                <div><span id="displayHint" class="display-hint">审核建议已生成</span><h4>内容审核建议</h4></div>
+              </div>
+              <blockquote id="suggestionText" class="suggestion-text"></blockquote>
+              <p class="visual-note">色彩与图标由页面依据建议文本进行视觉呈现，仅用于提高可读性，不改变后端返回内容。</p>
+              <div class="trace-row">
+                <div><span>审核编号</span><code id="requestId"></code></div>
+                <button id="copyIdButton" class="copy-button" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                  <span>复制编号</span>
+                </button>
+              </div>
+              <button id="restartButton" class="secondary-button" type="button">审核另一张图片</button>
+            </div>
+
+            <div id="errorResult" class="result-view result-view--error" role="alert" hidden>
+              <span class="error-mark" aria-hidden="true">
+                <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="19"/><path d="M24 14v13m0 7h.01"/></svg>
+              </span>
+              <span class="error-label">REQUEST INTERRUPTED</span>
+              <h4 id="errorTitle" tabindex="-1">审核未完成</h4>
+              <p id="errorMessage"></p>
+              <div id="errorMeta" class="error-meta" hidden>
+                <span id="errorCodeWrap">错误代码 <code id="errorCode"></code></span>
+                <span id="errorIdWrap">请求编号 <code id="errorId"></code></span>
+              </div>
+              <button id="retryButton" class="secondary-button" type="button">重新尝试</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="trust-section shell" aria-labelledby="trustTitle">
+      <div class="section-heading section-heading--dark">
+        <div><span>设计原则</span><h2 id="trustTitle">审慎、透明、以人为本</h2></div>
+      </div>
+      <div class="trust-grid">
+        <article><span>01</span><h3>本地预览</h3><p>选择图片后，浏览器仅在本地生成预览；点击审核后才上传。</p></article>
+        <article><span>02</span><h3>按需取证</h3><p>FG-CLIP2 是必经视觉工具，OCR 与规则检索由 Agent 按需调用。</p></article>
+        <article><span>03</span><h3>人工复核</h3><p>AI 输出是辅助建议，不替代平台运营人员的最终判断。</p></article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell"><span>ImageGuard · FG-CLIP2 Review Agent</span><span>辅助审核 · 人工复核 · 结果可追溯</span></div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

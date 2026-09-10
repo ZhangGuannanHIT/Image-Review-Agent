@@ -7,7 +7,7 @@ server:
   max_image_mb: 10
 
 runtime:
-  mode: "real"          # 当前进行真实基模全流程联调
+  mode: "mock"          # 默认安全演示；正式审核需配置完整依赖后切换 real
 
 ocr_config_path: "config/ocr.yaml"
 llm_config_path: "config/llm.yaml"
@@ -16,13 +16,13 @@ model:
   path: "fg_clip"
   ckpt_dir: "checkpoints/best"
   device: "cuda"
-  lora: false                 # 未训练联调只加载 FG-CLIP2 原始视觉权重
-  require_checkpoint: false  # 分类头随机初始化，结果仅用于验证流程
+  lora: true
+  require_checkpoint: true   # real 模式禁止随机分类头给出审核结论
 
 features:
   ocr_enabled: true
   lowlevel_enabled: true
-  rag_enabled: false          # RAG 尚未实现，本轮不注册该工具
+  rag_enabled: true           # 启用本地规则与判例检索
 
 # ReAct agent 配置（LLM 为核心）
 agent:

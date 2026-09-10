@@ -6,10 +6,13 @@
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
+| `GET` | `/` | 返回审核前端页面 |
+| `GET` | `/styles.css` | 前端样式（同源托管） |
+| `GET` | `/app.js` | 前端脚本（同源托管） |
 | `GET` | `/health` | 检查后端、Agent 与视觉模型是否已初始化 |
 | `POST` | `/api/review` | 上传单张图片并取得审核建议 |
 
-默认服务地址为 `http://localhost:8000`。若启动时设置了 `BACKEND_PORT`，端口以环境变量为准。当前未配置 CORS；前后端不同源时应由前端开发服务器反向代理到后端，或后续在 FastAPI 中显式配置允许的来源。
+默认服务地址为 `http://localhost:8000`。若启动时设置了 `BACKEND_PORT`，端口以环境变量为准。前端为 `frontend/` 下的纯静态页面，由 FastAPI 同源托管（`/`、`/styles.css`、`/app.js`），因此无需 CORS；浏览器直接访问 `http://localhost:8000/` 即可完成上传与审核。
 
 ## 2. 图片审核
 
@@ -100,7 +103,7 @@ HTTP 200 示例：
 | `model_loaded` | boolean | 真实视觉模型或 Mock Engine 是否可用 |
 | `mock` | boolean | `true` 表示模拟模式，`false` 表示真实视觉引擎 |
 
-`/health` 不会调用 DeepSeek、GLM-OCR，也不产生模型 API 费用。当前接口尚不返回 `model_trained`、GPU、LLM/OCR 连通性；因此 `mock=false` 只表示使用真实 FG-CLIP2 引擎，不代表分类头已经训练。当前联调配置使用随机分类头，日志中的 `trained=false` 才是准确状态。
+`/health` 不会调用 DeepSeek、GLM-OCR，也不产生模型 API 费用。仓库默认使用 Mock 模式；切换到 real 时启动脚本强制要求已训练 checkpoint。当前健康检查仍不探测 GPU、LLM/OCR 的实时连通性。
 
 ## 4. 超时口径
 
@@ -160,10 +163,10 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - `analyze_image`（FG-CLIP2）必须成功调用；Agent 提前提交会被调用守卫拒绝。
 - `ocr_image` 和 `analyze_lowlevel` 由 DeepSeek 按需调用。
 - GLM-OCR 只返回文字证据，不承担图片语义裁决。
-- RAG 当前通过配置关闭，`search_knowledge` 不注册给 Agent。
+- RAG 已通过配置启用；Agent 在取得 CLIP 证据后可按需调用 `search_knowledge`，无命中不代表图片安全。
 - LLM 不接收原始图片，只接收工具生成的文字证据。
 - 同一请求重复调用 CLIP 使用请求级缓存，不重复执行 GPU 推理。
-- 当前 `require_checkpoint=false` 仅用于跑通流程，随机分类头结果不得作为正式模型效果。
+- real 模式要求 `require_checkpoint=true`，禁止随机分类头给出正式审核结论。
 
 ## 7. 已验证状态
 
@@ -173,8 +176,8 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - DeepSeek-V4-Flash 能完成工具调用与最终裁决；
 - 一次真实链路为 `analyze_image → analyze_lowlevel → finalize_review`；
 - GLM-OCR 使用 Base64 data URI 的真实请求已成功；
-- RAG 未启用；
-- 自动化测试 15 项通过；
+- RAG 已启用，使用本地原子规则与脱敏判例检索；
+- 自动化测试覆盖 API、Agent、RAG、DeepSeek 配置和 GLM-OCR；
 - 上述后端内部变化没有修改前端请求字段和响应结构。
 
 ## 8. 前端联调检查表

@@ -43,15 +43,18 @@ def main():
         from src.engine import ReviewEngine
         from backend.ocr import OCRClient
         from backend.llm import LLMClient
-        model_path = os.path.join(_REPO_ROOT, cfg["model"]["path"])
+        model_config = cfg["model"]
+        if not model_config.get("lora", True) or not model_config.get("require_checkpoint", True):
+            raise RuntimeError("真实模式必须启用 LoRA 并要求已训练 checkpoint")
+        model_path = os.path.join(_REPO_ROOT, model_config["path"])
         engine = ReviewEngine(
             model_path,
-            ckpt_dir=os.path.join(_REPO_ROOT, cfg["model"]["ckpt_dir"]),
-            device=cfg["model"]["device"],
-            lora=cfg["model"].get("lora", True),
+            ckpt_dir=os.path.join(_REPO_ROOT, model_config["ckpt_dir"]),
+            device=model_config["device"],
+            lora=True,
             strict_load=True,
         )
-        if cfg["model"].get("require_checkpoint", True) and not engine.trained:
+        if not engine.trained:
             raise RuntimeError("真实模式需要已训练的 checkpoint（LoRA adapter + head.pt）")
         ocr_config_path = cfg.get("ocr_config_path", "config/ocr.yaml")
         if not os.path.isabs(ocr_config_path):
@@ -66,6 +69,11 @@ def main():
         raise ValueError(f"不支持的 runtime.mode: {mode}")
 
     features = cfg.get("features", {})
+    if features.get("rag_enabled", True):
+        from backend.rag import warmup
+        knowledge_count = warmup()
+        print(f"RAG 知识库已加载: {knowledge_count} 条")
+
     service = ReviewService(
         llm_model=llm_model, engine=engine, ocr_client=ocr_client,
         log_dir=os.path.join(_REPO_ROOT, cfg["log_dir"]),

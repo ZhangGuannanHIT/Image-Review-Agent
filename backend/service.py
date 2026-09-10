@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import uuid
 from typing import Any
 
@@ -60,17 +62,69 @@ class ReviewService:
     def ready(self) -> bool:
         return self.agent is not None and self.engine is not None
 
+    @staticmethod
+    def _redact_text(text: str) -> str:
+        redacted = re.sub(r"(?<!\d)1[3-9]\d{9}(?!\d)", "1**********", str(text))
+        return re.sub(r"(?<!\d)\d{17}[\dXx](?!\d)", "[身份证号已脱敏]", redacted)
+
+    @staticmethod
+    def _file_log_fields(filename: str) -> dict[str, str]:
+        if not filename:
+            return {"filename_hash": "", "file_extension": ""}
+        digest = hashlib.sha256(filename.encode("utf-8")).hexdigest()[:16]
+        return {"filename_hash": digest, "file_extension": os.path.splitext(filename)[1].lower()}
+
+    @staticmethod
+    def _sanitize_tool_results(results: dict[str, Any]) -> dict[str, Any]:
+        """保留审核审计信息，不把 OCR 原文或完整知识正文写入日志。"""
+        sanitized = dict(results)
+        ocr = sanitized.get("ocr_image")
+        if isinstance(ocr, dict):
+            sanitized["ocr_image"] = {
+                "success": bool(ocr.get("success", False)),
+                "available": bool(ocr.get("available", True)),
+                "provider": ocr.get("provider", ""),
+                "model": ocr.get("model", ""),
+                "text_count": len(ocr.get("texts", []) or []),
+                "request_id": ocr.get("request_id", ""),
+                "error": ocr.get("error"),
+            }
+
+        final_suggestion = sanitized.get("finalize_review")
+        if isinstance(final_suggestion, str):
+            sanitized["finalize_review"] = ReviewService._redact_text(final_suggestion)
+
+        searches = sanitized.get("search_knowledge")
+        if isinstance(searches, dict):
+            safe_searches: dict[str, list[dict[str, Any]]] = {}
+            for cache_key, matches in searches.items():
+                safe_searches[cache_key] = [
+                    {
+                        "id": item.get("id", ""),
+                        "type": item.get("type", item.get("profile", "")),
+                        "score": item.get("score"),
+                        "source_status": item.get("source", {}).get("locator_status", "")
+                        if isinstance(item.get("source"), dict) else "",
+                    }
+                    for item in (matches or []) if isinstance(item, dict)
+                ]
+            sanitized["search_knowledge"] = safe_searches
+        return sanitized
+
     def _log(self, record: dict[str, Any]) -> None:
         path = os.path.join(self.log_dir, "review.log.jsonl")
-        with open(path, "a", encoding="utf-8") as file:
-            file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        try:
+            with open(path, "a", encoding="utf-8") as file:
+                file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        except OSError as exc:
+            print(f"审核日志写入失败: {type(exc).__name__}: {exc}")
 
     def review(self, image_bytes: bytes, filename: str = "") -> ReviewResponse:
         request_id = uuid.uuid4().hex
         token = tools_mod.set_current_image(image_bytes)
         log: dict[str, Any] = {
             "request_id": request_id,
-            "filename": filename,
+            **self._file_log_fields(filename),
             "mock": self.mock_mode,
         }
         try:
@@ -98,10 +152,10 @@ class ReviewService:
                 "clip_succeeded": result.get("clip_succeeded", False),
                 "finalized": result.get("finalized", False),
                 "degraded": result.get("degraded", False),
-                "tool_results": result.get("tool_results", {}),
+                "tool_results": self._sanitize_tool_results(result.get("tool_results", {})),
                 "tool_cache_keys": sorted(context.cache.keys()),
                 "steps": result.get("steps", []),
-                "suggestion": suggestion,
+                "suggestion": self._redact_text(suggestion),
             })
             self._log(log)
             return ReviewResponse(id=request_id, suggestion=suggestion)
@@ -110,7 +164,7 @@ class ReviewService:
             log.update({
                 "error": f"{type(exc).__name__}: {exc}",
                 "degraded": True,
-                "suggestion": suggestion,
+                "suggestion": self._redact_text(suggestion),
             })
             self._log(log)
             return ReviewResponse(id=request_id, suggestion=suggestion)

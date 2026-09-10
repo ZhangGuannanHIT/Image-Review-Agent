@@ -1,6 +1,6 @@
 # FG-CLIP2 图片违规审核系统
 
-本项目使用 **FG-CLIP2 视觉模型 + DeepSeek-V4-Flash ReAct Agent** 审核图片。`analyze_image` 是程序级强制调用的基础工具；GLM-OCR 和低层像素分析由 Agent 按需选择；RAG 尚未实现并已从工具列表关闭。
+本项目使用 **FG-CLIP2 视觉模型 + DeepSeek-V4-Flash ReAct Agent** 审核图片。`analyze_image` 是程序级强制调用的基础工具；GLM-OCR、低层像素分析和本地规则判例 RAG 由 Agent 按需选择。
 
 当前标注仍在进行。训练、推理和评估始终以现有 Label Studio 四字段格式为唯一口径，阶段性数据只用于开发和冒烟，不作为最终实验结论。
 
@@ -9,10 +9,10 @@
 - FG-CLIP2 是唯一视觉理解模块，LLM 不直接看图片。
 - Agent 每次审核必须成功调用 `analyze_image`；调用守卫拒绝无 CLIP 证据的最终提交。
 - `ocr_image`、`analyze_lowlevel` 是 ReAct 可选工具；OCR 固定使用智谱 GLM-OCR。
-- RAG 尚未实现，当前通过 `features.rag_enabled: false` 从工具列表中硬关闭。
+- RAG 使用本地知识 JSON 和字符 2～4 gram TF-IDF 检索原子规则、脱敏判例与 OCR 语义边界；按原子字段和同义词短语分别评分，并以校准阈值过滤明显无关结果，不依赖外部向量数据库。
 - API 正常响应固定为 `{id, suggestion}`，结构化证据和工具轨迹仅写后端日志。
 - Mock 只用于开发联调，不能用于正式指标或冒充真实审核。
-- 当前 real 模式允许原始基模配合随机分类头做通路测试，但 `trained=false` 的输出禁止作为效果或正式审核结论。
+- 仓库默认使用 Mock 安全演示；real 模式必须加载已训练的 LoRA adapter 和分类头 checkpoint。
 
 ## 审核流程
 
@@ -24,7 +24,7 @@ flowchart TD
     D --> E[analyze_image / FG-CLIP2]
     D --> F[ocr_image / 可选]
     D --> G[analyze_lowlevel / 可选]
-    D -. RAG 启用后 .-> H[search_knowledge / 当前关闭]
+    D --> H[search_knowledge / 可选]
     E --> C
     F --> C
     G --> C
@@ -36,6 +36,20 @@ flowchart TD
 ```
 
 同一请求中重复调用 CLIP 会返回缓存，不重复执行 GPU 推理。图片字节存放在请求级 `ContextVar`，不会进入 LLM 消息。
+
+### RAG 阈值说明
+
+知识库使用15条原子规则及其同义词，并以附件中的全部55条明细查询进行阈值校准（明确违规15条、边界15条、同义/OCR错字15条、无关噪声10条）。采用字段级最高余弦相关度后，阈值 `0.30` 的统计结果为：45条非噪声查询的 Top-1 命中 `44/45（97.8%）`、查询级 HitRate@3 `45/45（100%）`、10条噪声拒绝 `10/10（100%）`；15条边界查询中有1条同时召回相反方向规则，边界冲突为 `1/15（6.7%）`。提高到 `0.31` 后，HitRate@3 开始下降为 `44/45（97.8%）`，因此选择 `0.30` 作为当前兼顾命中与误召回抑制的上限。
+
+`0.30` 是文本检索相关度门槛，不是30%的违规概率。当前唯一明显的边界冲突是“游戏《战神》暴力美学赏析”同时召回文艺安全边界和暴力美化规则，但安全边界位列 Top-1；Agent 应结合上下文和每条规则的 `negative_example` 判断是否适用，不能仅凭任一召回项裁决。上述数据来自参与规则与阈值设计的校准集，不是独立测试准确率；部分同义词和OCR错字已直接写入 tags，因此只能证明词法检索配置符合当前知识库，不能证明对未见表达的泛化能力。知识或表达方式扩展后，应使用未参与调参的新查询重新评估。
+
+无需启动前端或外部模型即可单独验证 RAG：
+
+```bash
+python -c "from backend.rag import retrieve; import json; print(json.dumps(retrieve('明确威胁他人生命安全', 3), ensure_ascii=False, indent=2))"
+```
+
+完整图片审核中，RAG 不提供单独的用户页面；DeepSeek Agent 会在取得 FG-CLIP2 证据后，自主决定是否调用 `search_knowledge`。命中 ID、类型、相关度和来源状态写入脱敏日志。
 
 ## 标签体系
 
@@ -57,6 +71,8 @@ flowchart TD
 ```text
 src/
 ├── backend/              Agent、工具、API、OCR/RAG、Mock、日志
+├── frontend/             纯静态审核页面（index.html / styles.css / app.js）
+├── knowledge/            规则判例知识库与阈值校准查询集
 ├── src/                  数据解析、模型、损失、推理、训练、评估
 ├── config/               标签、训练、推理、GLM-OCR 与 DeepSeek 独立配置
 ├── docs/                 架构与 API 文档
@@ -70,6 +86,12 @@ src/
 └── requirements.txt
 ```
 
+## 前端页面
+
+`frontend/` 是无需构建的原生 HTML/CSS/JavaScript 页面。启动后端后访问 `http://localhost:8000/` 即可进行同源审核；也可以直接双击 `frontend/index.html` 查看完整界面和本地选图预览，此时页面会明确显示“本地界面预览”，不会尝试调用审核接口。
+
+页面会根据后端 `suggestion` 文本为结果选择辅助色彩和图标，仅用于提高可读性，不改变接口内容，也不生成后端没有返回的结构化字段。
+
 ## 运行环境
 
 安装依赖：
@@ -81,7 +103,7 @@ python -m unittest discover -s tests -v
 
 ## Mock 模式
 
-如需纯 Mock 联调，把 `backend/config.yaml` 临时改为：
+`backend/config.yaml` 默认使用 Mock 模式：
 
 ```yaml
 runtime:
@@ -107,24 +129,24 @@ runtime:
   mode: real
 ```
 
-当前配置就是该模式，并用于“真实基模、未训练分类头”的全流程联调：
+切换前必须准备正式模型与外部服务配置：
 
 ```yaml
 model:
   device: cuda
-  lora: false
-  require_checkpoint: false
+  lora: true
+  require_checkpoint: true
 
 features:
   ocr_enabled: true
   lowlevel_enabled: true
-  rag_enabled: false
+  rag_enabled: true
 ```
 
 还需配置：
 
 - `model.path`：FG-CLIP2 基础模型目录；
-- 正式模型阶段再设置 `model.ckpt_dir` 并恢复 `lora: true`、`require_checkpoint: true`；
+- `model.ckpt_dir`：已训练的 LoRA adapter 与分类头 checkpoint；
 - `config/llm.yaml` 中的 DeepSeek-V4-Flash 参数；
 - `config/ocr.yaml` 中的 GLM-OCR 参数；`api_key` 可留空并由环境变量 `OCR_API_KEY` 提供。
 
@@ -235,7 +257,7 @@ python -m src.evaluate \
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖标签冲突、缺失掩码、多任务损失、模型头形状、CLIP 调用守卫、API 契约、GLM-OCR、DeepSeek 配置和 RAG 硬关闭。
+测试覆盖标签冲突、缺失掩码、多任务损失、模型头形状、CLIP 调用守卫、API 契约、GLM-OCR、DeepSeek 配置、RAG 开关和本地知识检索。
 
 ## Git 仓库边界
 
@@ -254,6 +276,6 @@ python -m unittest discover -s tests -v
 - 标注尚未完成，不能给出最终精度。
 - OCR 已固定并适配智谱 GLM-OCR，Base64 data URI 真实调用已通过。
 - 裁决 LLM 已固定为 DeepSeek-V4-Flash，真实 Agent 调用已通过。
-- RAG 当前未注册给 Agent，后续实现后再打开开关。
+- RAG 已实现为本地轻量文本检索；知识位于 `knowledge/knowledge.json`，检索分数仅表示文本相关度，不是违规概率。
 
 详细设计见 `docs/architecture.md`，前后端冻结契约见 `docs/api.md`。

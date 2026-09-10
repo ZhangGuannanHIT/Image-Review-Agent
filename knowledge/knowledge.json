@@ -1,0 +1,222 @@
+[
+  {
+    "id": "R001",
+    "type": "regulation",
+    "title": "教唆杀人或伤害犯罪方法",
+    "tags": ["教唆杀人", "谋杀教程", "如何杀人", "杀人的方法", "how to kill", "how 2 kill", "murder tutorial", "犯罪手法", "肢解教程"],
+    "content": "教唆、传授杀人或伤害他人的具体犯罪方法，属于高危教唆内容。",
+    "negative_example": "警方破案报道、普法材料中对作案手法的客观描述不按本规则直接判违规。",
+    "verdict": "高风险，建议下架并人工复核。",
+    "basis": "《网络信息内容生态治理规定》第六条第（九）项关于教唆犯罪的信息治理要求。",
+    "source": {"title": "网络信息内容生态治理规定及项目OCR审核规则", "publisher": "国家互联网信息办公室、项目组", "locator": "https://www.cac.gov.cn（站内搜索“网络信息内容生态治理规定”）", "locator_status": "site_search_only", "note": "法规依据与项目组原子化语义规则。"}
+  },
+  {
+    "id": "R002",
+    "type": "regulation",
+    "title": "教唆制造或使用武器爆炸物",
+    "tags": ["制造炸弹", "自制炸弹", "自制炸药", "制做炸蛋", "如河制做炸蛋", "制枪", "枪支改装", "bomb making", "make a bomb", "weapon tutorial", "武器教程"],
+    "content": "教唆制造、改装或使用爆炸物、枪支、管制刀具等武器，属于高危教唆犯罪内容。",
+    "negative_example": "军事历史科普、合法刀具商品信息和不含操作步骤的新闻报道不按本规则直接判违规。",
+    "verdict": "高风险，建议下架并人工复核。",
+    "basis": "教唆犯罪及暴力恐怖相关信息治理要求。",
+    "source": {"title": "网络信息内容生态治理规定及项目OCR审核规则", "publisher": "国家互联网信息办公室、项目组", "locator": "https://www.cac.gov.cn（站内搜索“网络信息内容生态治理规定”）", "locator_status": "site_search_only", "note": "法规依据与项目组原子化语义规则。"}
+  },
+  {
+    "id": "R003",
+    "type": "regulation",
+    "title": "宣扬恐怖主义或极端主义",
+    "tags": ["圣战", "为了圣战", "极端组织", "极端组织宣传片", "恐怖组织口号", "jihad", "terrorism slogan", "isis", "暴恐"],
+    "content": "宣扬恐怖主义、极端主义口号、标识或组织宣传内容，属于高危暴恐信息。",
+    "negative_example": "新闻中对恐怖主义的谴责、反恐行动报道和学术研究不按本规则直接判违规。",
+    "verdict": "高风险，建议立即拦截并交平台安全人员复核。",
+    "basis": "暴力恐怖和极端主义信息治理相关规定。",
+    "source": {"title": "暴恐音视频相关公开规定与项目OCR审核规则", "publisher": "公安机关公开资料、项目组", "locator": "https://gaj.yuncheng.gov.cn（站内搜索“暴力恐怖音视频”）", "locator_status": "site_search_only", "note": "用于暴恐文字语义审核。"}
+  },
+  {
+    "id": "R004",
+    "type": "regulation",
+    "title": "宣扬或美化暴力杀戮",
+    "tags": ["暴力美学", "暴力艺术", "赞美杀戮", "glorify violence", "praise killing", "嗜血", "屠杀开始", "一个不留", "no mercy", "见人就砍"],
+    "content": "以赞赏、鼓吹或浪漫化口吻宣扬暴力杀戮行为，属于严重暴力美化内容。",
+    "negative_example": "影视作品剧情介绍、评论分析和反思暴力的客观表达不按本规则直接判违规。",
+    "verdict": "严重风险，建议下架或限制传播并人工复核。",
+    "basis": "防范和抵制血腥、惊悚、残忍内容及暴力传播的相关要求。",
+    "source": {"title": "网络信息内容生态治理规定及项目OCR审核规则", "publisher": "国家互联网信息办公室、项目组", "locator": "https://www.cac.gov.cn（站内搜索“网络信息内容生态治理规定”）", "locator_status": "site_search_only", "note": "需结合语气和传播语境。"}
+  },
+  {
+    "id": "R005",
+    "type": "regulation",
+    "title": "渲染血腥肢解与器官暴露",
+    "tags": ["分尸", "断肢", "肢解", "砍头", "斩首", "尸体碎片", "剁成肉酱", "刀子捅进心脏", "捅进心脏", "肠子", "gore", "dismemberment", "bloodbath", "血流成河", "满地是血", "血肉模糊"],
+    "content": "以欣赏、猎奇、诱导观看或渲染口吻描述肢解、器官暴露、大量流血等血腥场景，属于严重血腥内容。",
+    "negative_example": "医学解剖教材、法医鉴定和新闻通报中的必要客观描述不按本规则直接判违规。",
+    "verdict": "严重风险，建议下架或限制传播并人工复核。",
+    "basis": "《网络信息内容生态治理规定》第七条第（五）项关于血腥、惊悚、残忍内容的要求。",
+    "source": {"title": "网络信息内容生态治理规定及项目OCR审核规则", "publisher": "国家互联网信息办公室、项目组", "locator": "https://www.cac.gov.cn（站内搜索“网络信息内容生态治理规定”）", "locator_status": "site_search_only", "note": "需区分渲染与医学、司法、新闻语境。"}
+  },
+  {
+    "id": "R006",
+    "type": "regulation",
+    "title": "针对特定对象的死亡或重伤威胁",
+    "tags": ["我要杀了你", "明确威胁他人生命安全", "砍死你", "弄死你", "弄死他全家", "大卸八块", "cut your throat", "murder him now", "I will kill you", "death threat", "等着挨刀", "威胁全家"],
+    "content": "针对特定个体作出明确死亡威胁或严重伤害警告，属于严重直接威胁文字。",
+    "negative_example": "无明确对象的情绪化口头禅或引用台词需结合上下文和画面，不能只凭词汇定性。",
+    "verdict": "高风险，建议拦截或人工复核。",
+    "basis": "暴力、凶杀信息治理要求及项目OCR直接威胁审核规则。",
+    "source": {"title": "互联网信息服务管理办法及项目OCR审核规则", "publisher": "中华人民共和国国务院、项目组", "locator": "https://xzfg.moj.gov.cn（司法部国家行政法规库检索）", "locator_status": "site_search_only", "note": "需确认威胁对象与完整语境。"}
+  },
+  {
+    "id": "R007",
+    "type": "regulation",
+    "title": "煽动针对群体实施暴力",
+    "tags": ["种族清洗", "屠杀某群体", "全部杀光", "消灭所有敌人", "ethnic cleansing", "kill all", "exterminate", "地域仇恨", "群体暴力"],
+    "content": "煽动对特定种族、民族、地域或其他群体实施暴力，属于高危暴力仇恨内容。",
+    "negative_example": "二战等历史事件的客观讨论、反仇恨宣传和新闻报道不按本规则直接判违规。",
+    "verdict": "高风险，建议立即拦截并人工复核。",
+    "basis": "煽动暴力及相关违法信息治理要求。",
+    "source": {"title": "网络信息内容生态治理规定及项目OCR审核规则", "publisher": "国家互联网信息办公室、项目组", "locator": "https://www.cac.gov.cn（站内搜索“网络信息内容生态治理规定”）", "locator_status": "site_search_only", "note": "必须结合目标群体和上下文。"}
+  },
+  {
+    "id": "R008",
+    "type": "ocr_boundary",
+    "title": "无明确指向的轻度暴力动作词",
+    "tags": ["砍杀", "打架", "斗殴", "fight", "beat", "袭击", "见人就砍"],
+    "content": "只出现轻度暴力动作词且没有明确对象、伤害结果或宣扬语气时，属于一般风险线索，不能单独确定严重等级。",
+    "negative_example": "游戏攻略、体育竞技、影视剧情和新闻客观描述不按本规则直接判违规。",
+    "verdict": "结合画面、语境和其他证据判断，必要时人工复核。",
+    "basis": "项目OCR文字语境审核边界。",
+    "source": {"title": "OCR原子化知识条目", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "一般风险线索，不是关键词黑名单。"}
+  },
+  {
+    "id": "R009",
+    "type": "ocr_boundary",
+    "title": "警方法院新闻与案件报道",
+    "tags": ["警方通报", "侦破杀人案", "杀人案件", "嫌疑人被捕", "法院判决", "判处杀人犯", "法医鉴定", "刀伤", "反恐胜利", "murder case solved", "court ruling"],
+    "content": "警方通报、案件侦破、法院判决、法医报告和反恐行动等客观新闻描述属于安全语境，不因出现暴力词汇直接判违规。",
+    "negative_example": "借新闻名义猎奇传播血腥图片、虚构案情或赞美暴力时不适用本安全边界。",
+    "verdict": "不因关键词直接判违规，仍需结合画面和传播目的。",
+    "basis": "项目OCR文字审核中的新闻报道安全边界。",
+    "source": {"title": "OCR原子化知识条目", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "安全语境规则。"}
+  },
+  {
+    "id": "R010",
+    "type": "ocr_boundary",
+    "title": "普法与反暴力宣传",
+    "tags": ["反对暴力", "反暴力", "禁止杀人", "不要杀人", "拒绝校园欺凌", "普法", "法律后果", "anti-violence", "law article", "珍惜生命"],
+    "content": "反暴力宣传、普法教育、法律条文引用和倡导珍惜生命的文字属于安全语境。",
+    "negative_example": "表面使用反暴力措辞但实际煽动、威胁或配合血腥画面猎奇传播时不适用。",
+    "verdict": "不因其中的暴力词汇直接判违规。",
+    "basis": "项目OCR文字审核中的普法宣传安全边界。",
+    "source": {"title": "OCR原子化知识条目", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "安全语境规则。"}
+  },
+  {
+    "id": "R011",
+    "type": "ocr_boundary",
+    "title": "影视游戏动漫与客观文艺描述",
+    "tags": ["游戏《战神》", "电影《杀死比尔》", "Kill Bill", "进击的巨人", "剧情简介", "影视名称", "游戏评论", "二战历史", "历史事件讨论", "外科手术", "动物世界", "狮子捕杀斑马"],
+    "content": "电影、游戏、动漫名称，官方剧情简介，历史讨论，医学描述和自然纪录片等客观内容，不因包含暴力词汇直接判违规。",
+    "negative_example": "额外加入鼓吹杀戮、猎奇血腥或针对具体对象的威胁时不适用。",
+    "verdict": "结合画面和表达目的判断，标题或客观引用本身通常不违规。",
+    "basis": "项目OCR文字审核中的文艺、历史、医学和纪录片语境边界。",
+    "source": {"title": "OCR原子化知识条目", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "安全语境规则。"}
+  },
+  {
+    "id": "R012",
+    "type": "regulation",
+    "title": "暴力渲染文字与血腥画面协同",
+    "tags": ["处决现场", "血腥画面", "暴力配文", "图文组合", "共同渲染", "点击观看", "现场血迹"],
+    "content": "OCR文字以渲染、赞美或诱导观看方式描述暴力，同时画面存在血腥证据时，图文组合会提高传播风险。",
+    "negative_example": "只有文字但没有相应画面证据时，不能使用本规则补造视觉事实。",
+    "verdict": "结合FG-CLIP2视觉结果提高审核风险，并引用适用规则；冲突时人工复核。",
+    "basis": "图文组合审核原则及已核验传播案例。",
+    "source": {"title": "OCR原子化知识条目及核验案例", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "必须有视觉证据配合。"}
+  },
+  {
+    "id": "R013",
+    "type": "ocr_boundary",
+    "title": "否定暴力的句式",
+    "tags": ["不要杀人", "禁止杀人", "反对暴力", "拒绝校园霸凌", "拒绝校园欺凌", "don't kill", "文明游戏", "禁止骂人"],
+    "content": "含不要、禁止、反对、拒绝等否定词的暴力表达，通常是在阻止或反对暴力。",
+    "negative_example": "否定词被断章取义、反讽使用或与实际威胁内容冲突时需结合上下文。",
+    "verdict": "明确否定表达不按暴力关键词直接判违规。",
+    "basis": "项目OCR文字审核中的否定句式边界。",
+    "source": {"title": "OCR原子化知识条目", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "安全与边界语境规则。"}
+  },
+  {
+    "id": "R014",
+    "type": "ocr_boundary",
+    "title": "OCR乱码、单字与语义不可辨识",
+    "tags": ["乱码", "口口", "单字杀", "杀杀杀", "符号", "文字缺失", "OCR失败", "OCR超时", "语义不清"],
+    "content": "OCR文字缺失、乱码、仅有单字重复或上下文不足时，无法形成可靠语义。OCR调用失败也不能表述为图片没有文字。",
+    "negative_example": "OCR成功取得完整且语义明确的威胁、教唆或安全文本时不适用。",
+    "verdict": "不直接定级，标记OCR证据不足并建议人工复核。",
+    "basis": "项目OCR结果质量与失败语义边界。",
+    "source": {"title": "OCR原子化知识条目", "publisher": "项目组", "locator": "用户提供的原子化知识附件", "locator_status": "attachment_only", "note": "用于区分无文字、乱码和服务失败。"}
+  },
+  {
+    "id": "R015",
+    "type": "regulation",
+    "title": "以取乐为目的描述虐待他人或动物",
+    "tags": ["虐猫", "虐狗", "折磨囚犯", "虐待动物", "torture", "animal abuse", "凌虐", "虐待视频", "太残忍了"],
+    "content": "以取乐、鼓吹或传播猎奇为目的描述虐待、折磨他人或动物，属于严重虐待内容。",
+    "negative_example": "动物保护组织反虐待宣传、公益曝光和合法调查报道不按本规则直接判违规。",
+    "verdict": "严重风险，建议限制传播、下架或人工复核。",
+    "basis": "防范血腥残忍内容及项目暴力血腥审核规则。",
+    "source": {"title": "网络信息内容生态治理规定及项目OCR审核规则", "publisher": "国家互联网信息办公室、项目组", "locator": "https://www.cac.gov.cn（站内搜索“网络信息内容生态治理规定”）", "locator_status": "site_search_only", "note": "需区分宣传虐待与反虐待公益语境。"}
+  },
+  {
+    "id": "CASE-VERIFIED-01",
+    "type": "verified_case",
+    "title": "传播血腥命案图片并配发相关文字",
+    "tags": ["命案", "血腥图片", "配文", "虚假信息", "社会恐慌", "图文组合"],
+    "content": "公开通报涉及现场血迹和死者照片被拍摄、转发，并有人将命案图片与无关生活照组合后配发相关文字，造成不良影响。案例摘要已去除个人姓名。",
+    "negative_example": "普通新闻报道不等同于猎奇传播或虚构关联。",
+    "verdict": "传播血腥图片并以配文渲染或制造虚假关联属于高风险图文传播行为。",
+    "basis": "图像血腥内容、传播行为及配文共同造成社会恐慌和不良影响。",
+    "source": {"title": "发布传播血腥命案图片 五个嫌疑人被行政拘留", "publisher": "漳州市公安局", "locator": "http://gaj.zhangzhou.gov.cn/cms/siteresource/article.shtml?id=60443686270980001&siteId=530418350472890000", "locator_status": "exact_url_verified", "note": "用户材料标记为已核验案例；只保留脱敏审核摘要。"}
+  },
+  {
+    "id": "CASE-VERIFIED-02",
+    "type": "verified_case",
+    "title": "游戏资讯配图和文字含血腥暴力元素",
+    "tags": ["游戏资讯", "配图", "血腥", "恐怖", "肢体分离", "刀砍"],
+    "content": "某游戏网站的资讯配图、文字和下载内容被认定含有血腥、恐怖、暴力元素。",
+    "negative_example": "普通游戏名称、攻略和客观评论不等同于传播血腥暴力内容。",
+    "verdict": "图文共同呈现和渲染血腥暴力内容时，应判为高风险并限制传播。",
+    "basis": "暴力、凶杀、恐怖及血腥残忍信息治理要求。",
+    "source": {"title": "江苏：昆山市办结一起提供非法网络文化产品案", "publisher": "中国扫黄打非网", "locator": "https://www.shdf.gov.cn（站内搜索“昆山 游戏网站 血腥暴力”）", "locator_status": "site_search_only", "note": "内容已核验，但未提供稳定正文URL。"}
+  },
+  {
+    "id": "CASE-VERIFIED-03",
+    "type": "verified_case",
+    "title": "传播宣扬暴力恐怖和宗教极端内容",
+    "tags": ["暴恐", "恐怖主义", "宗教极端", "传播", "文字图片", "音视频"],
+    "content": "公开通报涉及通过互联网传播、存储宣扬暴力恐怖和宗教极端等内容的文字、图片及音视频。",
+    "negative_example": "新闻谴责、反恐宣传和学术研究不等同于宣扬暴恐。",
+    "verdict": "完整语境中明确宣扬恐怖主义或极端主义时，应作为严重高风险证据。",
+    "basis": "反恐怖主义、治安管理及互联网信息服务相关规定。",
+    "source": {"title": "有关部门查处传播违法信息典型案例", "publisher": "新疆维吾尔自治区互联网信息办公室、自治区公安厅", "locator": "http://news.ts.cn/system/2019/06/08/035726908.shtml", "locator_status": "exact_url_verified", "note": "用户材料标记为已核验案例。"}
+  },
+  {
+    "id": "CASE-VERIFIED-04",
+    "type": "verified_case",
+    "title": "面向未成年人播放含暴力血腥元素的动漫内容",
+    "tags": ["动漫", "未成年人", "暴力", "血腥", "字幕", "视听内容"],
+    "content": "公开行政处罚案例涉及活动中播放含有不适宜未成年人的暴力、血腥元素的动漫内容。",
+    "negative_example": "单纯作品名称或客观剧情介绍不能自动等同于违规传播。",
+    "verdict": "面向未成年人传播暴力血腥内容应从严审核。",
+    "basis": "未成年人保护要求及相关营业性演出管理规定。",
+    "source": {"title": "文化和旅游市场涉未成年人保护行政处罚典型案例（案例一）", "publisher": "四川省文化和旅游厅", "locator": "https://wlt.sc.gov.cn/scwlt/xzcf2/2025/6/17/940d075c49074054af9516a9d4f3966e.shtml", "locator_status": "exact_url_verified", "note": "用户材料标记为已核验案例。"}
+  },
+  {
+    "id": "CASE-TEACHING-01",
+    "type": "teaching_case",
+    "title": "转发恐怖暴力血腥内容的教学案例",
+    "tags": ["教学案例", "转发", "暴恐", "血腥", "猎奇传播"],
+    "content": "项目组根据多地公开材料归纳：因猎奇制作、存储或传播恐怖暴力血腥内容可能产生法律和平台治理风险。",
+    "negative_example": "该内容不是单一官方通报原文，不得作为真实个案或处罚依据。",
+    "verdict": "仅用于说明传播风险，不能作为权威判例。",
+    "basis": "项目组对公开材料共性特征的教学性归纳。",
+    "source": {"title": "项目组整理的暴恐内容传播教学案例", "publisher": "项目组", "locator": "用户提供的OCR判例汇编附件", "locator_status": "attachment_only", "note": "必须与法规或已核验来源共同使用。"}
+  }
+]

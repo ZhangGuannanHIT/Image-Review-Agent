@@ -10,7 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .prompts import SYSTEM_PROMPT
 from .state import ReviewState
-from .tools import get_request_context, tools_by_name
+from .tools import get_request_context, knowledge_cache_key, tools_by_name
 
 
 def build_agent(
@@ -37,6 +37,7 @@ def build_agent(
         clip_called = state.get("clip_called", False)
         clip_succeeded = state.get("clip_succeeded", False)
         finalized = state.get("finalized", False)
+        degraded = state.get("degraded", False)
         suggestion = state.get("suggestion", "")
         output_messages: list[ToolMessage] = []
 
@@ -61,7 +62,7 @@ def build_agent(
             cached_before = False
             try:
                 context = get_request_context()
-                cache_name = name if name != "search_knowledge" else f"search_knowledge:{args.get('query', '')}"
+                cache_name = name if name != "search_knowledge" else knowledge_cache_key(str(args.get("query", "")))
                 cached_before = cache_name in context.cache or (
                     name == "analyze_image" and "analyze_image_text" in context.cache
                 )
@@ -74,12 +75,24 @@ def build_agent(
                     suggestion = content.strip()
                     finalized = True
                     tool_results[name] = suggestion
+                elif name == "search_knowledge":
+                    searches = dict(tool_results.get(name, {}))
+                    searches[cache_name] = context.cache.get(cache_name, content)
+                    tool_results[name] = searches
                 else:
                     tool_results[name] = context.cache.get(cache_name, content)
-                steps.append({"type": "tool_call", "name": name, "cached": cached_before, "ok": True})
+                    if name == "ocr_image":
+                        ocr_result = context.cache.get(cache_name, {})
+                        if isinstance(ocr_result, dict) and not ocr_result.get("success", False):
+                            degraded = True
+                step = {"type": "tool_call", "name": name, "cached": cached_before, "ok": True}
+                if name == "search_knowledge":
+                    step["cache_key"] = cache_name
+                steps.append(step)
                 output_messages.append(ToolMessage(content=content, tool_call_id=call_id, name=name))
             except Exception as exc:  # noqa: BLE001
                 content = f"工具 {name} 调用失败: {type(exc).__name__}: {exc}"
+                degraded = True
                 if name == "analyze_image":
                     clip_called = True
                     clip_succeeded = False
@@ -98,6 +111,7 @@ def build_agent(
             "clip_called": clip_called,
             "clip_succeeded": clip_succeeded,
             "finalized": finalized,
+            "degraded": degraded,
             "suggestion": suggestion,
         }
 

@@ -31,4 +31,4 @@ Pillow
 PyYAML
 opencv-python          # 低层像素特征兜底（lowlevel.py）
 
-# 说明：ocr/paddleocr、rag/faiss-chroma 等按需后期加，本期 RAG 仅占位、OCR 走外接 API。
+# 说明：OCR 走外接 API；RAG 使用标准库字符 n-gram TF-IDF，无额外向量库依赖。

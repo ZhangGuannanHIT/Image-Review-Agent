@@ -41,8 +41,8 @@ class ModelOutput:
         return self.type.get("labels", [])
 
     @property
-    def quality_label(self) -> str:
-        return self.quality.get("label", "")
+    def quality_labels(self) -> list[str]:
+        return self.quality.get("labels", [])
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -86,6 +86,18 @@ def _single_label(logits: torch.Tensor, classes: list[str]) -> dict[str, Any]:
     }
 
 
+def _multi_label(
+    logits: torch.Tensor, classes: list[str], thresholds: dict[str, float],
+) -> dict[str, Any]:
+    probs = torch.sigmoid(logits.float())[0].tolist()
+    # 在原始概率上判断阈值，避免显示时的四舍五入改变标签。
+    return {
+        "labels": [label for label, score in zip(classes, probs) if score >= thresholds[label]],
+        "scores": {label: round(float(score), 6) for label, score in zip(classes, probs)},
+        "thresholds": dict(thresholds),
+    }
+
+
 class ReviewEngine:
     """加载 FG-CLIP2、LoRA/Head，并提供单图结构化推理。"""
 
@@ -98,13 +110,19 @@ class ReviewEngine:
         dtype: Optional[torch.dtype] = None,
         type_thresholds: Optional[dict[str, float]] = None,
         strict_load: bool = False,
+        quality_thresholds: Optional[dict[str, float]] = None,
     ):
         self.model_path = str(model_path)
         self.ckpt_dir = str(ckpt_dir or "")
         self.lora = lora
         self.device = self._resolve_device(device)
         self.dtype = dtype or (torch.float32 if self.device == "cpu" else torch.float16)
-        self.type_thresholds = type_thresholds or {label: 0.5 for label in labels.TYPE_CLASSES}
+        self.type_thresholds = {label: float((type_thresholds or {}).get(label, 0.5))
+                                for label in labels.TYPE_CLASSES}
+        self.quality_thresholds = {label: float((quality_thresholds or {}).get(label, 0.5))
+                                   for label in labels.QUALITY_CLASSES}
+        if any(not 0 <= value <= 1 for value in (*self.type_thresholds.values(), *self.quality_thresholds.values())):
+            raise ValueError("多标签阈值必须位于 [0, 1]")
         self.strict_load = strict_load
         self.model: Optional[ReviewModel] = None
         self.processor = None
@@ -147,24 +165,22 @@ class ReviewEngine:
     def _load_checkpoint(self, ckpt_dir: str) -> None:
         assert self.model is not None
         labels_path = os.path.join(ckpt_dir, "labels.json")
+        head_path = os.path.join(ckpt_dir, "head.pt")
+        adapter_path = os.path.join(ckpt_dir, "adapter_model.safetensors")
+        adapter_bin = os.path.join(ckpt_dir, "adapter_model.bin")
+        has_weights = any(os.path.isfile(path) for path in (head_path, adapter_path, adapter_bin))
+        if has_weights and not os.path.isfile(labels_path):
+            raise ValueError("checkpoint 缺少 labels.json，无法确认 quality 多标签契约；请重新训练")
         if os.path.isfile(labels_path):
             with open(labels_path, "r", encoding="utf-8") as file:
                 saved_schema = json.load(file)
-            current_schema = {
-                "risk": labels.RISK_CLASSES,
-                "type": labels.TYPE_CLASSES,
-                "injury": labels.INJURY_CLASSES,
-                "quality": labels.QUALITY_CLASSES,
-            }
+            current_schema = labels.checkpoint_schema()
             if saved_schema != current_schema:
-                raise ValueError("checkpoint 标签顺序与当前 Label Studio 标签契约不一致")
-        head_path = os.path.join(ckpt_dir, "head.pt")
+                raise ValueError("checkpoint 标签或任务类型不匹配：quality 已改为多标签，旧单标签权重需重新训练")
         if os.path.isfile(head_path):
             self.model.load_head(head_path)
             self.head_loaded = True
 
-        adapter_path = os.path.join(ckpt_dir, "adapter_model.safetensors")
-        adapter_bin = os.path.join(ckpt_dir, "adapter_model.bin")
         if os.path.isfile(adapter_path) or os.path.isfile(adapter_bin):
             from peft import load_peft_weights, set_peft_model_state_dict
 
@@ -177,12 +193,7 @@ class ReviewEngine:
         if self.model is None:
             raise RuntimeError("模型未加载，无法保存 checkpoint")
         self.model.save_trainable(output_dir)
-        schema = {
-            "risk": labels.RISK_CLASSES,
-            "type": labels.TYPE_CLASSES,
-            "injury": labels.INJURY_CLASSES,
-            "quality": labels.QUALITY_CLASSES,
-        }
+        schema = labels.checkpoint_schema()
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         with open(os.path.join(output_dir, "labels.json"), "w", encoding="utf-8") as file:
             json.dump(schema, file, ensure_ascii=False, indent=2)
@@ -225,18 +236,14 @@ class ReviewEngine:
 
         risk = _single_label(logits["risk"], labels.RISK_CLASSES)
         injury = _single_label(logits["injury"], labels.INJURY_CLASSES)
-        quality = _single_label(logits["quality"], labels.QUALITY_CLASSES)
-        type_probs = torch.sigmoid(logits["type"].float())[0]
-        type_scores = {
-            label: round(float(score), 6)
-            for label, score in zip(labels.TYPE_CLASSES, type_probs.tolist())
-        }
-        selected = [
-            label for label, score in type_scores.items()
-            if score >= float(self.type_thresholds.get(label, 0.5))
-        ]
-        type_result = {"labels": selected, "scores": type_scores, "thresholds": self.type_thresholds}
-        confidence = min(risk["confidence"], injury["confidence"], quality["confidence"])
+        quality = _multi_label(logits["quality"], labels.QUALITY_CLASSES, self.quality_thresholds)
+        type_result = _multi_label(logits["type"], labels.TYPE_CLASSES, self.type_thresholds)
+        # quality 是五个独立的二元判断；取最不确定判断的概率作为保守提示。
+        quality_confidence = min(
+            score if label in quality["labels"] else 1 - score
+            for label, score in quality["scores"].items()
+        )
+        confidence = min(risk["confidence"], injury["confidence"], quality_confidence)
         return ModelOutput(
             risk=risk, type=type_result, injury=injury, quality=quality,
             conf=round(float(confidence), 6), trained=self.trained,

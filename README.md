@@ -46,9 +46,13 @@ flowchart TD
 | `risk_level`    | 单标签 |      5 | L0/L1/L2/L3/X                                |
 | `violence_type` | 多标签 |      4 | 无暴力、直接暴力、后果展示、暗示/威胁        |
 | `injury_detail` | 单标签 |      4 | 无、轻微、中度、严重                         |
-| `quality`       | 单标签 |      5 | 清晰、轻微模糊、严重模糊、文字扭曲、故意遮挡 |
+| `quality`       | 多标签 |      5 | 清晰、轻微模糊、严重模糊、文字扭曲、故意遮挡 |
 
-`target` 暂只用于数据复核，不参与本轮训练。缺失标签通过 `IGNORE_INDEX` 或 `type_valid` 掩码忽略，不会被当作负标签。
+`quality` 使用长度为 5 的 multi-hot 向量。例如“轻微模糊 + 故意遮挡”编码为 `[0, 1, 0, 0, 1]`，标签顺序与选择先后无关。质量头仍输出 5 个 logits，训练使用带正例权重的 BCEWithLogits，推理逐类 sigmoid 后按阈值选择全部命中的标签，默认阈值为 0.5；没有类别达到阈值时返回空列表，不强制选一类。
+
+`target` 暂只用于数据复核，不参与本轮训练。risk/injury 缺失时通过 `IGNORE_INDEX` 忽略；violence_type/quality 分别使用 `type_valid`/`quality_valid` 掩码，不会把缺失标注当作负标签。quality 包含无法映射的值时，该样本的质量任务暂不参与训练与评估，原始标注保留供复核。
+
+质量证据统一使用 `quality.labels`（列表）、`quality.scores`（五类独立概率）和 `quality.thresholds`；CLI、Mock 和 Agent 工具均使用此格式。HTTP 正常响应仍为 `{id, suggestion}`。
 
 标签定义见 `src/labels.py` 和 `config/labels.yaml`。
 
@@ -72,14 +76,30 @@ src/
 
 ## 运行环境
 
-项目内已经建立 `.venv`：Python 3.12 + CUDA 12.8 PyTorch，已验证可识别 RTX 5060 Ti（`sm_120`）并完成 FG-CLIP2 原始权重前向。不要使用系统的 WindowsApps `python.exe` 或父目录 CPU 环境。
+以下命令均从 **Git 仓库根目录**执行
 
-安装依赖：
+Windows PowerShell 首次安装（先安装 Python 3.12 和支持 CUDA 12.8 的 NVIDIA 驱动）：
 
 ```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\Activate.ps1
-python -m unittest discover -s tests -v
 ```
+
+若无法执行激活脚本，可将后文命令中的 `python` 替换为 `.\.venv\Scripts\python.exe`。请使用仓库内的解释器，避免误用 WindowsApps 的 Python 别名或父目录的 CPU 环境。
+
+首次启动或运行测试前，准备本地配置；以下命令不会覆盖已有配置：
+
+```powershell
+if (-not (Test-Path config/llm.yaml)) { Copy-Item config/llm.example.yaml config/llm.yaml }
+if (-not (Test-Path config/ocr.yaml)) { Copy-Item config/ocr.example.yaml config/ocr.yaml }
+python -c "import torch; print(torch.__version__); print('CUDA available:', torch.cuda.is_available())"
+python -B -m unittest discover -s tests -v
+```
+
+测试使用 Mock，无需真实 API Key，但配置读取测试需要上述两个 YAML 文件。real 模式还需准备完整的 `fg_clip/` 本地模型并配置密钥。环境变量覆盖 YAML 中的密钥值，不能代替配置文件本身。
 
 ## Mock 模式
 
@@ -186,6 +206,8 @@ checkpoints/best/
 └── metrics.json
 ```
 
+新 checkpoint 的 `labels.json` 包含 `schema_version: 2`、各任务类型和类别顺序，quality 的任务类型为 `multi_label`。旧单标签 quality 权重虽然也是 5 维，其训练含义不同，加载时会拒绝；请按多标签链路重新训练。存在权重但缺少标签契约的 checkpoint 也会被拒绝。
+
 ## 数据体检
 
 ```bash
@@ -198,7 +220,7 @@ python -m src.dataset \
 
 ## 训练
 
-先在 `config/train.yaml` 填写：
+正式训练在 `config/train.yaml` 填写最终数据路径；工程冒烟在独立的 `config/train.smoke.yaml` 中填写阶段性数据路径。两份配置均需要：
 
 ```yaml
 data:
@@ -206,11 +228,21 @@ data:
   image_root: /path/to/images
 ```
 
-工程冒烟：
+工程冒烟使用独立配置（默认 batch size 为 1、epoch 为 1）：
 
-```bash
-python -m src.train --config config/train.yaml --smoke-steps 1
+```powershell
+python -m src.train --config config/train.smoke.yaml --smoke-steps 1
 ```
+
+也可使用 `python -m src.train --smoke-steps 1`，自动选择 `config/train.smoke.yaml`。只指定该配置、不传 `--smoke-steps` 时，默认最多执行 1 个优化步。优化步结束后仍会对冒烟划分的验证集执行评估并保存产物，因此可使用准备好的小规模数据进行通路验证。
+
+| 产物               | 正式训练/评估         | 工程冒烟/评估               |
+| ------------------ | --------------------- | --------------------------- |
+| 数据划分           | `data/split.json`   | `data/smoke/split.json`   |
+| 最佳权重与验证指标 | `checkpoints/best/` | `checkpoints/smoke/best/` |
+| 独立评估结果       | `eval_results/`     | `eval_results/smoke/`     |
+
+冒烟配置带有 `smoke: true`。冒烟入口会在写文件和加载模型前校验划分、权重、评估路径均位于各自的 `smoke/` 专用目录；旧命令 `--config config/train.yaml --smoke-steps 1` 会被拒绝，避免覆盖正式产物。冒烟产物只用于开发验证。
 
 正式训练：
 
@@ -229,7 +261,13 @@ python -m src.evaluate \
   --split test
 ```
 
-评估输出包括四任务基础指标、risk 混淆矩阵和 L3 recall。
+评估输出包括四任务基础指标、risk 混淆矩阵和 L3 recall。violence_type 与 quality 均按多标签计算 micro/macro F1 及逐类 precision、recall、F1，缺失质量标注不计入 quality 指标。
+
+冒烟权重单独评估时，必须使用冒烟配置与对应 checkpoint，结果写入 `eval_results/smoke/`：
+
+```powershell
+python -m src.evaluate --config config/train.smoke.yaml --checkpoint checkpoints/smoke/best --split val
+```
 
 ## 测试
 
@@ -237,7 +275,7 @@ python -m src.evaluate \
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖标签冲突、缺失掩码、多任务损失、模型头形状、CLIP 调用守卫、API 契约、GLM-OCR、DeepSeek 配置和 RAG 硬关闭。
+测试覆盖标签冲突、缺失掩码、多任务损失、模型头形状、CLIP 调用守卫、API 契约、GLM-OCR、DeepSeek 配置和 RAG 硬关闭；另覆盖 quality 多选解析、BCE 梯度、推理与评估、旧 checkpoint 拒绝，以及冒烟路径隔离和小模型训练保存。测试临时产物自动清理，不加载真实基模训练，也不调用收费 API。
 
 ## Git 仓库边界
 

@@ -41,7 +41,7 @@ def single_label_metrics(y_true, y_pred, classes: list[str]) -> dict[str, Any]:
     }
 
 
-def multilabel_metrics(y_true, y_pred, valid_mask) -> dict[str, Any]:
+def multilabel_metrics(y_true, y_pred, valid_mask, classes: list[str] = TYPE_CLASSES) -> dict[str, Any]:
     true, pred = np.asarray(y_true), np.asarray(y_pred)
     valid = np.asarray(valid_mask, dtype=bool)
     if not valid.any():
@@ -49,7 +49,7 @@ def multilabel_metrics(y_true, y_pred, valid_mask) -> dict[str, Any]:
     true, pred = true[valid], pred[valid]
     per_class, f1_values = {}, []
     total_tp = total_fp = total_fn = 0.0
-    for index, label in enumerate(TYPE_CLASSES):
+    for index, label in enumerate(classes):
         tp = float(np.logical_and(true[:, index] == 1, pred[:, index] == 1).sum())
         fp = float(np.logical_and(true[:, index] == 0, pred[:, index] == 1).sum())
         fn = float(np.logical_and(true[:, index] == 1, pred[:, index] == 0).sum())
@@ -70,9 +70,11 @@ def multilabel_metrics(y_true, y_pred, valid_mask) -> dict[str, Any]:
 def review_metrics(records: dict[str, list]) -> dict[str, Any]:
     result = {
         "risk": single_label_metrics(records["risk_true"], records["risk_pred"], RISK_CLASSES),
-        "type": multilabel_metrics(records["type_true"], records["type_pred"], records["type_valid"]),
+        "type": multilabel_metrics(records["type_true"], records["type_pred"], records["type_valid"], TYPE_CLASSES),
         "injury": single_label_metrics(records["injury_true"], records["injury_pred"], INJURY_CLASSES),
-        "quality": single_label_metrics(records["quality_true"], records["quality_pred"], QUALITY_CLASSES),
+        "quality": multilabel_metrics(
+            records["quality_true"], records["quality_pred"], records["quality_valid"], QUALITY_CLASSES
+        ),
     }
     risk_true, risk_pred = np.asarray(records["risk_true"]), np.asarray(records["risk_pred"])
     l3 = risk_true == RISK_CLASSES.index("L3_严重违规")

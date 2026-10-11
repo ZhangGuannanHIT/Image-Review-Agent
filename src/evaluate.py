@@ -17,10 +17,12 @@ from .metrics import review_metrics
 from .training_dataset import ReviewCollator, ReviewDataset, move_batch_to_device
 
 
-def evaluate_loader(model, loader, device, type_threshold: float = 0.5) -> dict:
+def evaluate_loader(
+    model, loader, device, type_threshold: float = 0.5, quality_threshold: float = 0.5,
+) -> dict:
     records = {key: [] for key in (
         "risk_true", "risk_pred", "type_true", "type_pred", "type_valid",
-        "injury_true", "injury_pred", "quality_true", "quality_pred",
+        "injury_true", "injury_pred", "quality_true", "quality_pred", "quality_valid",
     )}
     model.eval()
     with torch.inference_mode():
@@ -37,8 +39,11 @@ def evaluate_loader(model, loader, device, type_threshold: float = 0.5) -> dict:
             records["type_valid"].extend(batch["type_valid"].cpu().tolist())
             records["injury_true"].extend(batch["injury_label"].cpu().tolist())
             records["injury_pred"].extend(logits["injury"].argmax(-1).cpu().tolist())
-            records["quality_true"].extend(batch["quality_label"].cpu().tolist())
-            records["quality_pred"].extend(logits["quality"].argmax(-1).cpu().tolist())
+            records["quality_true"].extend(batch["quality_target"].cpu().int().tolist())
+            records["quality_pred"].extend(
+                (torch.sigmoid(logits["quality"]) >= quality_threshold).cpu().int().tolist()
+            )
+            records["quality_valid"].extend(batch["quality_valid"].cpu().tolist())
     return review_metrics(records)
 
 

@@ -70,7 +70,7 @@ def text_evidence(output: Any) -> str:
         f"违规等级: {risk.get('label', '')} (置信度 {float(risk.get('confidence', 0)):.2f}) | "
         f"暴力类型: {violence.get('labels', [])} | "
         f"血腥程度: {injury.get('label', '')} (置信度 {float(injury.get('confidence', 0)):.2f}) | "
-        f"图像质量: {quality.get('label', '')} (置信度 {float(quality.get('confidence', 0)):.2f}) | "
+        f"图像质量（多标签）: {quality.get('labels', [])} (各类概率 {quality.get('scores', {})}) | "
         f"审核头已训练: {bool(data.get('trained', False))}"
     )
 

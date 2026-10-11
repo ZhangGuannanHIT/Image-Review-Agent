@@ -20,6 +20,7 @@ injury_classes:
   - "中度（明显开放性伤口/大量血泊）"
   - "严重（器官/骨骼暴露/分尸）"
 
+# quality 与 violence_type 均为多标签；缺失字段使用各自的 valid 掩码。
 quality_classes:
   - "清晰"
   - "轻微模糊"

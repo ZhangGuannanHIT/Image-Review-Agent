@@ -50,9 +50,8 @@ class ReviewCollator:
             "injury_label": torch.tensor([
                 s.injury if s.injury is not None else IGNORE_INDEX for s in samples
             ], dtype=torch.long),
-            "quality_label": torch.tensor([
-                s.quality if s.quality is not None else IGNORE_INDEX for s in samples
-            ], dtype=torch.long),
+            "quality_target": torch.tensor([s.quality_set for s in samples], dtype=torch.float32),
+            "quality_valid": torch.tensor([s.quality_valid for s in samples], dtype=torch.bool),
             "sample_indices": torch.tensor([item["sample_index"] for item in items], dtype=torch.long),
         })
         return encoded

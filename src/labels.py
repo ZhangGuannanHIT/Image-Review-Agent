@@ -32,7 +32,7 @@ INJURY_CLASSES = [
     "无血腥", "轻微（微量血迹/淤青）", "中度（明显开放性伤口/大量血泊）", "严重（器官/骨骼暴露/分尸）",
 ]
 
-# ==== quality（taxonomy 单选，5 类）====
+# ==== quality（taxonomy 多选，5 路独立二分类）====
 QUALITY_CLASSES = [
     "清晰", "轻微模糊", "严重模糊", "文字扭曲形变", "故意遮挡（马赛克/黑条/贴纸）",
 ]
@@ -42,6 +42,21 @@ IGNORE_INDEX = -1
 
 # 训练总损失权重
 LOSS_WEIGHTS = {"risk": 1.0, "type": 0.5, "injury": 0.5, "quality": 0.5}
+
+
+def checkpoint_schema() -> dict:
+    """保存类别顺序与任务类型，避免将旧单标签质量头误作多标签头加载。"""
+    return {
+        "schema_version": 2,
+        "task_types": {
+            "risk": "single_label", "type": "multi_label",
+            "injury": "single_label", "quality": "multi_label",
+        },
+        "risk": list(RISK_CLASSES),
+        "type": list(TYPE_CLASSES),
+        "injury": list(INJURY_CLASSES),
+        "quality": list(QUALITY_CLASSES),
+    }
 
 
 def validate_label_schema() -> None:

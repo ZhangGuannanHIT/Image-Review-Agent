@@ -42,7 +42,7 @@ def main():
         print(f"risk: {result['risk']['label']}")
         print(f"violence_type: {result['type']['labels']}")
         print(f"injury: {result['injury']['label']}")
-        print(f"quality: {result['quality']['label']}")
+        print(f"quality: {result['quality']['labels']}")
         print(f"confidence: {result['conf']:.4f}")
 
 

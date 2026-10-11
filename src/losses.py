@@ -104,7 +104,7 @@ class MultiTaskLoss(nn.Module):
     def __init__(
         self,
         risk_weight=None, type_pos_weight=None,
-        injury_weight=None, quality_weight=None,
+        injury_weight=None, quality_pos_weight=None,
         label_smoothing: float = 0.05, focal_gamma: float = 0.0,
         task_weights: dict | None = None,
     ):
@@ -112,19 +112,19 @@ class MultiTaskLoss(nn.Module):
         self.risk_loss = WeightedCE(risk_weight, label_smoothing, focal_gamma=focal_gamma)
         self.type_loss = WeightedBCE(type_pos_weight, focal_gamma=focal_gamma)
         self.injury_loss = WeightedCE(injury_weight, label_smoothing, focal_gamma=focal_gamma)
-        self.quality_loss = WeightedCE(quality_weight, label_smoothing, focal_gamma=focal_gamma)
+        self.quality_loss = WeightedBCE(quality_pos_weight, focal_gamma=focal_gamma)
         self.w = task_weights or {"risk": 1.0, "type": 0.5, "injury": 0.5, "quality": 0.5}
 
     def forward(
         self, logits: dict[str, torch.Tensor], batch: dict[str, torch.Tensor],
         return_parts: bool = False,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
-        """计算多任务损失；type_valid=False 的样本不会成为伪负标签。"""
+        """计算多任务损失；缺失的 type / quality 不会成为伪负标签。"""
         parts = {
             "risk": self.risk_loss(logits["risk"], batch["risk_label"]),
             "type": self.type_loss(logits["type"], batch["type_target"], batch.get("type_valid")),
             "injury": self.injury_loss(logits["injury"], batch["injury_label"]),
-            "quality": self.quality_loss(logits["quality"], batch["quality_label"]),
+            "quality": self.quality_loss(logits["quality"], batch["quality_target"], batch["quality_valid"]),
         }
         parts["total"] = sum(self.w[name] * parts[name] for name in ("risk", "type", "injury", "quality"))
         return parts if return_parts else parts["total"]
@@ -153,7 +153,8 @@ if __name__ == "__main__":
         "risk_label": torch.tensor([0, 1, 2, 3]),
         "type_target": torch.randint(0, 2, (4, 4)).float(),
         "injury_label": torch.tensor([0, 1, 2, 3]),
-        "quality_label": torch.tensor([0, 1, 2, 3]),
+        "quality_target": torch.randint(0, 2, (4, 5)).float(),
+        "quality_valid": torch.tensor([True, True, False, True]),
     }
     print("MultiTaskLoss:", mt(d, b).item())
     print("losses 冒烟通过")

@@ -64,13 +64,56 @@ def _type_pos_weight(samples: list[Sample]) -> torch.Tensor:
     return ((len(valid) - positive) / positive).clamp(min=0.1, max=10.0)
 
 
+def _quality_pos_weight(samples: list[Sample]) -> torch.Tensor:
+    valid = torch.tensor(
+        [sample.quality_set for sample in samples if sample.quality_valid], dtype=torch.float32
+    )
+    if valid.numel() == 0:
+        return torch.ones(len(QUALITY_CLASSES))
+    positive = valid.sum(0)
+    return ((len(valid) - positive) / positive.clamp(min=1)).clamp(min=0.1, max=10.0)
+
+
+def load_training_config(
+    config_path: str | None = None,
+    smoke_steps: int = 0,
+    *,
+    project_root: Path | None = None,
+) -> tuple[dict, int]:
+    """选择训练配置，并在任何输出写入之前检查冒烟产物隔离。"""
+    if smoke_steps < 0:
+        raise ValueError("--smoke-steps 不能为负数")
+    root = (project_root or Path.cwd()).resolve()
+    selected = config_path or ("config/train.smoke.yaml" if smoke_steps else "config/train.yaml")
+    with (root / selected).open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    if not isinstance(config, dict):
+        raise ValueError("训练配置必须是 YAML 映射")
+    is_smoke = smoke_steps > 0 or config.get("smoke", False)
+    if is_smoke:
+        paths = (
+            ("data.split_path", config["data"].get("split_path", "data/split.json"), "data/smoke", True),
+            ("output_dir", config.get("output_dir", "checkpoints"), "checkpoints/smoke", False),
+            ("eval_dir", config.get("eval_dir", "eval_results"), "eval_results/smoke", False),
+        )
+        for name, value, dedicated_dir, is_file in paths:
+            allowed = root / dedicated_dir
+            actual = (root / value).resolve()
+            if not actual.is_relative_to(allowed) or (is_file and actual == allowed):
+                raise ValueError(
+                    f"冒烟配置的 {name} 必须位于 {dedicated_dir}/ 内，实际为 {value!r}；"
+                    "请使用 config/train.smoke.yaml，避免覆盖正式训练产物"
+                )
+        smoke_steps = smoke_steps or 1
+    return config, smoke_steps
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="训练 FG-CLIP2 四任务审核模型")
-    parser.add_argument("--config", default="config/train.yaml")
-    parser.add_argument("--smoke-steps", type=int, default=0, help="大于 0 时只运行指定优化步数")
+    parser.add_argument("--config", help="默认使用 train.yaml；指定 --smoke-steps 时默认使用 train.smoke.yaml")
+    parser.add_argument("--smoke-steps", type=int, default=0, help="大于 0 时最多运行指定优化步数，且强制隔离输出")
     args = parser.parse_args()
-    with open(args.config, "r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+    config, smoke_steps = load_training_config(args.config, args.smoke_steps)
     data_cfg, optim_cfg = config["data"], config["optim"]
     if not data_cfg.get("json_path") or not data_cfg.get("image_root"):
         raise ValueError("请先配置 data.json_path 和 data.image_root")
@@ -95,6 +138,10 @@ def main() -> None:
         lora_r=config["lora"]["r"], lora_alpha=config["lora"]["alpha"],
         lora_dropout=config["lora"]["dropout"], dtype=dtype, device=device,
     )
+    # AMP 使用半精度计算，但被优化参数与梯度需保留 FP32，供 GradScaler 安全反缩放。
+    for parameter in model.parameters():
+        if parameter.requires_grad:
+            parameter.data = parameter.data.float()
     processor = AutoImageProcessor.from_pretrained(
         config["model_path"], trust_remote_code=True, local_files_only=True
     )
@@ -111,7 +158,7 @@ def main() -> None:
         risk_weight=_weights(train_samples, "risk", len(RISK_CLASSES)),
         type_pos_weight=_type_pos_weight(train_samples),
         injury_weight=_weights(train_samples, "injury", len(INJURY_CLASSES)),
-        quality_weight=_weights(train_samples, "quality", len(QUALITY_CLASSES)),
+        quality_pos_weight=_quality_pos_weight(train_samples),
         label_smoothing=config["loss"].get("label_smoothing", 0.05),
         focal_gamma=config["loss"].get("focal_gamma", 0.0),
         task_weights=LOSS_WEIGHTS,
@@ -141,7 +188,7 @@ def main() -> None:
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
-                if args.smoke_steps and global_step >= args.smoke_steps:
+                if smoke_steps and global_step >= smoke_steps:
                     break
         metrics = evaluate_loader(model, val_loader, device)
         score = metrics["risk"]["macro_f1"] or 0.0
@@ -155,7 +202,7 @@ def main() -> None:
             )
         else:
             patience_used += 1
-        if args.smoke_steps and global_step >= args.smoke_steps:
+        if smoke_steps and global_step >= smoke_steps:
             break
         if patience_used >= int(optim_cfg.get("patience", 5)):
             break

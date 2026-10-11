@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src.engine import ModelOutput
+from src.labels import QUALITY_CLASSES
 
 
 class MockReviewEngine:
@@ -20,7 +21,11 @@ class MockReviewEngine:
             risk={"label": "L2_中度违规", "index": 2, "confidence": 0.82, "scores": {}},
             type={"labels": ["直接暴力（攻击进行中）"], "scores": {}, "thresholds": {}},
             injury={"label": "轻微（微量血迹/淤青）", "index": 1, "confidence": 0.71, "scores": {}},
-            quality={"label": "清晰", "index": 0, "confidence": 0.93, "scores": {}},
+            quality={
+                "labels": ["清晰"],
+                "scores": {label: 0.93 if label == "清晰" else 0.07 for label in QUALITY_CLASSES},
+                "thresholds": {label: 0.5 for label in QUALITY_CLASSES},
+            },
             conf=0.71,
             trained=False,
         )

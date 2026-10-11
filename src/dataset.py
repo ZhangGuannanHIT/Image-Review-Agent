@@ -15,7 +15,6 @@ from typing import Any, Optional
 
 from .labels import (
     RISK_CLASSES, TYPE_CLASSES, INJURY_CLASSES, QUALITY_CLASSES,
-    IGNORE_INDEX,
 )
 
 # ---- 各控件（from_name）-> 类别常量名 ----
@@ -28,13 +27,14 @@ _TARGET = "target"  # 不训练，但需要捕获以用于体检/备查
 
 @dataclass
 class Sample:
-    """一条训练/推理样本。缺失字段取 IGNORE_INDEX。"""
+    """一条样本：单标签缺失用 None，多标签缺失用全零目标和 valid=False。"""
     image_path: str
     risk: Optional[int]          # RISK_CLASSES 索引，缺失 -> None/IGNORE_INDEX
-    type_set: list[int]          # TYPE_CLASSES 多标签 0/1（长度=4），缺失 -> 全 -1 标记
+    type_set: list[int]          # TYPE_CLASSES 多标签 0/1（长度=4）
     type_valid: bool             # type 字段是否有效（缺失为 False）
     injury: Optional[int]        # INJURY_CLASSES 索引
-    quality: Optional[int]       # QUALITY_CLASSES 索引
+    quality_set: list[int]       # QUALITY_CLASSES 多标签 0/1（长度=5）
+    quality_valid: bool          # 缺失或无法完整映射时为 False，不作为负标签训练
     raw: dict[str, Any] = field(default_factory=dict)  # 原始标签（备查/复用）
 
     @property
@@ -44,10 +44,6 @@ class Sample:
     @property
     def injury_valid(self) -> bool:
         return self.injury is not None
-
-    @property
-    def quality_valid(self) -> bool:
-        return self.quality is not None
 
 
 # ---- 从 Label Studio taxonomy / choices 值提取叶子集合 ----
@@ -181,7 +177,7 @@ def parse_label_studio(
         risk, risk_unmapped = _encode_single(parsed.get(_RISK, []), RISK_CLASSES)
         type_mask, type_unmapped = _encode_multihot(parsed.get(_TYPE, []), TYPE_CLASSES)
         injury, inj_unmapped = _encode_single(parsed.get(_INJURY, []), INJURY_CLASSES)
-        quality, qual_unmapped = _encode_single(parsed.get(_QUALITY, []), QUALITY_CLASSES)
+        quality_mask, qual_unmapped = _encode_multihot(parsed.get(_QUALITY, []), QUALITY_CLASSES)
 
         # --- 记录分布/缺失/未映射 ---
         if parsed.get(_RISK):
@@ -232,7 +228,8 @@ def parse_label_studio(
             type_set=type_mask,
             type_valid=bool(parsed.get(_TYPE)),
             injury=injury,
-            quality=quality,
+            quality_set=quality_mask,
+            quality_valid=bool(any(quality_mask)) and not qual_unmapped,
             raw={"task_id": task_id, "file_upload": file_upload,
                  "parsed": parsed, "image_uri": image_uri},
         ))

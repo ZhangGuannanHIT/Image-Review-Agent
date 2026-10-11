@@ -38,7 +38,8 @@ class CoreTests(unittest.TestCase):
             "type_target": torch.zeros(3, 4),
             "type_valid": torch.tensor([True, False, True]),
             "injury_label": torch.tensor([0, 1, 2]),
-            "quality_label": torch.tensor([0, 1, 2]),
+            "quality_target": torch.tensor([[1., 0., 0., 0., 0.], [0., 1., 0., 0., 1.], [0., 0., 0., 0., 0.]]),
+            "quality_valid": torch.tensor([True, True, False]),
         }
         loss = criterion(logits, batch)
         self.assertTrue(torch.isfinite(loss))
@@ -48,6 +49,7 @@ class CoreTests(unittest.TestCase):
         output = MultiTaskHead()(torch.randn(2, 768))
         self.assertEqual(tuple(output["risk"].shape), (2, 5))
         self.assertEqual(tuple(output["type"].shape), (2, 4))
+        self.assertEqual(tuple(output["quality"].shape), (2, 5))
 
     def test_patch_bucket(self):
         self.assertEqual(determine_max_patches(Image.new("RGB", (64, 64))), 128)

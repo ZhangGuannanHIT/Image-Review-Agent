@@ -20,7 +20,7 @@ for _p in (_REPO_ROOT, os.path.join(_REPO_ROOT, "fg_clip")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from .labels import RISK_CLASSES, TYPE_CLASSES, INJURY_CLASSES, QUALITY_CLASSES
+from .labels import RISK_CLASSES, TYPE_CLASSES, INJURY_CLASSES, QUALITY_CLASSES, checkpoint_schema
 
 
 def _get_fgclip_model_cls():
@@ -51,7 +51,7 @@ class MultiTaskHead(nn.Module):
     """共享投影 + 4 个任务头。
 
     从视觉塔 pooler_output(768d) → 共享投影(512d) → 各任务头。
-    各头输出 logits；type 为多标签时输出 4 个 sigmoid-logits（BCE 用 logits 即可）。
+    各头输出 logits；type 与 quality 分别输出 4、5 个独立二元 logits，供 BCE 使用。
     """
 
     def __init__(self, embed_dim: int = 768, hidden: int = 512):
@@ -146,7 +146,8 @@ class ReviewModel(nn.Module):
 
     def forward(self, image_embeds: torch.Tensor) -> dict[str, torch.Tensor]:
         """由 image_embeds 推断所有任务 logits。"""
-        return self.head(image_embeds.to(device=self.model_device, dtype=self.model_dtype))
+        head_param = next(self.head.parameters())
+        return self.head(image_embeds.to(device=head_param.device, dtype=head_param.dtype))
 
     def save_trainable(self, output_dir: str) -> None:
         """保存最小推理产物：视觉 LoRA adapter 与四任务分类头。"""
@@ -154,12 +155,7 @@ class ReviewModel(nn.Module):
         if hasattr(self.vision, "save_pretrained"):
             self.vision.save_pretrained(output_dir, safe_serialization=True)
         torch.save(self.head.state_dict(), os.path.join(output_dir, "head.pt"))
-        schema = {
-            "risk": RISK_CLASSES,
-            "type": TYPE_CLASSES,
-            "injury": INJURY_CLASSES,
-            "quality": QUALITY_CLASSES,
-        }
+        schema = checkpoint_schema()
         with open(os.path.join(output_dir, "labels.json"), "w", encoding="utf-8") as file:
             json.dump(schema, file, ensure_ascii=False, indent=2)
 

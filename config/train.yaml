@@ -5,8 +5,8 @@ model_path: "fg_clip"          # 原始权重目录
 device: "cuda"
 seed: 42
 data:
-  json_path: ""                # ★ 最终版 Label Studio JSON 路径
-  image_root: ""               # ★ 图片本地根目录（JSON file_upload 对应）
+  json_path: "data/clean/labels.json"   # 由 python -m src.build_dataset 产出的清洗标签文件
+  image_root: "data/clean/images"       # 与 labels.json 一一配对的图片目录
   split: [0.85, 0.10, 0.05]    # train / val / test
   stratify_key: "risk"
   split_path: "data/split.json"
@@ -22,8 +22,8 @@ optim:
   lr_lora: 1.0e-4
   lr_head: 1.0e-3
   weight_decay: 0.01
-  batch_size: 16
-  grad_accum: 1
+  batch_size: 4        # RTX 4060 Laptop 8GB：16 张图同时前向/反向会 OOM
+  grad_accum: 4        # 4 × 4 = 16，保持原来的有效 batch
   epochs: 20          # 实际由早停决定
   patience: 5
   amp: true           # fp16

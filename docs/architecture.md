@@ -112,9 +112,10 @@ FG-CLIP2 Vision Transformer
 
 ### 推理解码
 
-- risk、injury、quality：softmax + argmax；
-- violence type：sigmoid + 各类别阈值；
+- risk、injury：softmax + argmax（单标签）；
+- violence type、quality：逐类 sigmoid + 各自阈值（多标签，可同时命中多个；没有类别过阈值时返回空列表，不强制选一个）；
 - 输出标签来自 `src/labels.py`；
+- 多标签阈值来自 `config/inference.yaml`（`src/cli.py` 读取），也可由 `ReviewEngine` 参数覆盖；
 - `trained=false` 表示分类头未加载训练权重，结果不能作为正式审核。
 
 ## 6. 标签与损失
@@ -124,7 +125,7 @@ FG-CLIP2 Vision Transformer
 | risk          | 加权 CE  | `IGNORE_INDEX`        |
 | violence type | 加权 BCE | `type_valid` 样本掩码 |
 | injury        | 加权 CE  | `IGNORE_INDEX`        |
-| quality       | 加权 CE  | `IGNORE_INDEX`        |
+| quality       | 加权 BCE | `quality_valid` 掩码  |
 
 总损失：
 
@@ -132,17 +133,18 @@ FG-CLIP2 Vision Transformer
 1.0 × risk + 0.5 × type + 0.5 × injury + 0.5 × quality
 ```
 
-缺失的 violence type 不会被编码成全负监督；没有有效样本时使用 `logits.sum() * 0` 保持计算图。
+缺失的 violence type / quality 不会被编码成全负监督；没有有效样本时使用 `logits.sum() * 0` 保持计算图。quality 无法完整映射时按缺失处理（`quality_valid=False`），该样本不参与 quality 训练与评估。
 
 ## 7. 数据规则
 
-输入是 Label Studio JSON。当前数据仍在标注中，所以现有分布仅用于开发。
+输入是 Label Studio JSON；`python -m src.build_dataset` 负责配对、标签头收敛与确定性清洗，输出可直接训练的 `data/clean/`。
 
-- “无暴力 + 其他暴力类型”属于确定性冲突，可清理；
-- L0 + 直接暴力、L3 + 无暴力属于复核候选，不自动删除；
-- 未标注任务不进入训练；
-- 部分字段缺失时只忽略对应任务损失；
-- 最终数据到位后重新体检并生成固定 `data/split.json`。
+- 图片与标签按 `file_upload` 文件名一一配对，缺图任务剔除；无标签的图片不进数据集；
+- 训练标签文件只保留 `risk_level` / `violence_type` / `injury_detail` / `quality` 四个模型输出头，`target` / `note` 剥离到 `review_extras.json`；
+- 确定性矛盾按主因删除：`无暴力 + 其他暴力类型`、`L0_安全` 却标直接暴力/后果展示、`L0_安全` 却有血腥、`L0_安全` 却标暗示/威胁、`L1/L2/L3` 却无暴力且无血腥、`L1/L2/L3` 却缺失表现字段；
+- `L0_安全` 却严重模糊/文字扭曲、`X` 却标「清晰」只进入复核清单，不自动改标签；
+- 未标注任务不进入训练；部分字段缺失时只忽略对应任务损失；
+- 最终数据到位后重新体检并生成固定 `data/split.json`（冒烟划分在 `data/smoke/split.json`）。
 
 ## 8. Checkpoint
 
@@ -158,6 +160,8 @@ checkpoint/
 ```
 
 基础模型权重不重复保存。推理时组合：FG-CLIP2 基础权重 + LoRA adapter + 分类头。`labels.json` 用于防止标签顺序不一致。
+
+`labels.json` 由 `labels.checkpoint_schema()` 生成，含 `schema_version: 2` 与 `task_types`（quality 为 `multi_label`）。加载时缺 `labels.json` 或 schema 不匹配都会直接报错，避免把旧单标签 quality 权重当成多标签头使用。
 
 ## 9. Mock 与 real 模式
 
@@ -257,7 +261,9 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 - 确定性冲突清理与复核候选；
 - FG-CLIP2 processor 和真实视觉前向；
 - LoRA 视觉塔与四任务头；
-- 加权多任务损失和 type 掩码；
+- 加权多任务损失与 type/quality 多标签掩码；
+- 数据配对、标签头收敛与确定性清洗（`src/build_dataset.py`，输出 `data/clean/`）；
+- 推理配置 `config/inference.yaml` 实际生效（`src/cli.py` 读取 type/quality 阈值）；
 - checkpoint 保存/加载接口；
 - 调用守卫和工具缓存；
 - Mock 端到端流程；
@@ -269,7 +275,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 - GLM-OCR Base64 data URI 真实接口验证；
 - API 基础校验和统一错误结构；
 - 最小训练、评估入口；
-- 自动化测试。
+- 自动化测试 48 项。
 
 当前真实联调结果：
 
@@ -277,7 +283,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 - 示例链路成功执行 `analyze_image → analyze_lowlevel → finalize_review`；
 - CLIP 调用守卫通过，Agent 正常收敛且未降级；
 - OCR 独立真实调用成功；
-- 自动化测试 15 项通过。
+- 自动化测试 48 项通过（含 9 项不依赖 torch 的数据与配置测试）。
 
 仍依赖外部条件：
 

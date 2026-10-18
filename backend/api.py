@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import io
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
 from .schemas import ErrorResponse, HealthResponse, ReviewResponse
@@ -19,6 +21,8 @@ app = FastAPI(title="违规内容审核系统", version="0.4")
 _service: Optional[ReviewService] = None
 _max_image_bytes = 10 * 1024 * 1024
 _allowed_formats = {"JPEG", "PNG", "WEBP"}
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_FRONTEND_DIR = _REPO_ROOT / "frontend_1008" / "frontend"
 
 
 class APIError(Exception):
@@ -87,3 +91,9 @@ def review(image: UploadFile = File(...)):
         return _service.review(data, filename=image.filename)
     except Exception as exc:  # noqa: BLE001
         raise APIError(500, 50000, "审核服务内部错误", request_id) from exc
+
+
+# 放在所有 API 路由之后：/health、/api/review、/docs 优先匹配，其余路径交给前端静态页。
+# 前端只使用相对地址 /health 和 /api/review，因此必须与后端同源访问。
+if _FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="frontend")

@@ -174,7 +174,7 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - 一次真实链路为 `analyze_image → analyze_lowlevel → finalize_review`；
 - GLM-OCR 使用 Base64 data URI 的真实请求已成功；
 - RAG 未启用；
-- 自动化测试 15 项通过；
+- 自动化测试 48 项通过（含数据集构建与推理配置契约测试）；
 - 上述后端内部变化没有修改前端请求字段和响应结构。
 
 ## 8. 前端联调检查表

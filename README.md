@@ -59,14 +59,13 @@ flowchart TD
 ## 目录
 
 ```text
-src/
 ├── backend/              Agent、工具、API、OCR/RAG、Mock、日志
 ├── src/                  数据解析、模型、损失、推理、训练、评估
 ├── config/               标签、训练、推理、GLM-OCR 与 DeepSeek 独立配置
 ├── docs/                 架构与 API 文档
 ├── fg_clip/              本地 FG-CLIP2 基础模型（不提交 Git）
 ├── checkpoints/          LoRA adapter 与分类头
-├── data/                 固定数据划分
+├── data/                 固定数据划分；data/clean/ 为清洗后可训练数据集（不提交 Git）
 ├── eval_results/         评估指标
 ├── sample_images/        本地示例图片（不提交 Git）
 ├── tests/                自动化测试
@@ -208,6 +207,33 @@ checkpoints/best/
 
 新 checkpoint 的 `labels.json` 包含 `schema_version: 2`、各任务类型和类别顺序，quality 的任务类型为 `multi_label`。旧单标签 quality 权重虽然也是 5 维，其训练含义不同，加载时会拒绝；请按多标签链路重新训练。存在权重但缺少标签契约的 checkpoint 也会被拒绝。
 
+## 前后端联调
+
+后端把 `frontend_1008/frontend` 挂载到 `/`，直接访问 http://localhost:8000/ 即可。前端只使用相对地址 `/health` 和 `/api/review`，所以必须与 API 同源访问（不要用 `file://` 打开 `index.html`，那会进入离线预览模式）。
+
+先用 Mock 验证接口契约（不需要任何 Key）：
+
+```powershell
+wsl -d Ubuntu
+conda activate fgclip
+cd /mnt/d/Image-Review-Agent
+BACKEND_MODE=mock python run_backend.py
+```
+
+Windows 浏览器打开 http://localhost:8000/。`/health` 应返回 `{"status":"ok","service_ready":true,"model_loaded":true,"mock":true}`。
+
+真实模式（使用 2026-10-18 训练权重）需要 DeepSeek Key：
+
+```bash
+export LLM_API_KEY="你的 DeepSeek API Key"     # 或写进 config/llm.yaml
+python run_backend.py                           # backend/config.yaml 默认 mode=real
+```
+
+- `backend/config.yaml` 已设为 `lora: true`、`require_checkpoint: true`、`ckpt_dir: checkpoints/best`，缺少权重会拒绝启动。
+- `features.ocr_enabled` 默认 `false`。拿到智谱 GLM-OCR Key 后填入 `config/ocr.yaml`，再把该开关改为 `true`。
+- `config/llm.yaml`、`config/ocr.yaml` 是本地敏感配置（已被 `.gitignore` 排除），不要提交。
+- 端口被占用时用 `BACKEND_PORT=8001 python run_backend.py`。
+
 ## 数据体检
 
 ```bash
@@ -216,7 +242,44 @@ python -m src.dataset \
   --image-root /path/to/images
 ```
 
-当前 JSON 是阶段性导出。确定性冲突（如“无暴力 + 其他暴力类型”）可以清理；L0 与直接暴力、L3 与无暴力等语义张力只进入复核清单，不自动修改标签。
+当前 JSON 是阶段性导出，体检报告用于核对分布、缺失与语义张力。
+
+## 数据构建（清洗 → 可直接训练）
+
+```bash
+python -m src.build_dataset \
+  --json /path/to/project-6-export.json \
+  --image-root /path/to/images \
+  --out data/clean
+```
+
+脚本做三件事：按 `file_upload` 文件名与图片一一配对；把标签头收敛成 `risk_level` / `violence_type` / `injury_detail` / `quality` 四个模型输出头；剔除违规等级与暴力/血腥表现互相矛盾的样本。
+
+产物：
+
+```text
+data/clean/
+├── labels.json             训练用标签（只含四个输出头，quality 为多标签）
+├── images/                 与 labels.json 一一配对的图片
+├── report.json            通过率、删除明细、清洗前后分布（机读）
+├── report.md              同一份报告的 Markdown 版
+├── removed_samples.jsonl  逐条删除原因与原标签
+└── review_extras.json     原 target / note 复核信息
+```
+
+当前冻结数据（2026-10-11 导出）：3045 条任务全部有图，清洗后保留 **2922** 条，删除 123 条（确定性矛盾 114 条 + 标注全部取消 9 条），**通过率 95.96%**。删除规则按主因归类：
+
+| 规则 | 含义 | 删除数 |
+|---|---|---:|
+| `C1_type_self_conflict` | violence_type 同时选了「无暴力」和其他暴力类型 | 3 |
+| `C2_safe_but_violence` | `L0_安全` 却标注直接暴力/后果展示 | 48 |
+| `C3_safe_but_blood` | `L0_安全` 却标注存在血腥 | 27 |
+| `C5_safe_but_threat` | `L0_安全` 却标注暗示/威胁（武器指向/捆绑） | 19 |
+| `C4_risk_without_evidence` | `L1/L2/L3` 却标注无暴力且无血腥 | 5 |
+| `C6_risk_without_evidence_field` | `L1/L2/L3` 却缺失暴力类型或血腥程度 | 12 |
+| `C0_no_valid_annotation` | 标注全部取消，无法训练 | 9 |
+
+判「安全」却严重模糊/文字扭曲（471 条）、`X_无法判定` 却标「清晰」只进入复核清单，不自动改标签。
 
 ## 训练
 
@@ -224,9 +287,11 @@ python -m src.dataset \
 
 ```yaml
 data:
-  json_path: /path/to/final-label-studio.json
-  image_root: /path/to/images
+  json_path: data/clean/labels.json    # python -m src.build_dataset 的产物
+  image_root: data/clean/images
 ```
+
+当前仓库里两条路径都已指向清洗后的数据集，换数据时只改这两行即可。
 
 工程冒烟使用独立配置（默认 batch size 为 1、epoch 为 1）：
 
@@ -263,6 +328,18 @@ python -m src.evaluate \
 
 评估输出包括四任务基础指标、risk 混淆矩阵和 L3 recall。violence_type 与 quality 均按多标签计算 micro/macro F1 及逐类 precision、recall、F1，缺失质量标注不计入 quality 指标。
 
+多标签阈值在验证集上标定（逐类扫描并复算测试集）：
+
+```bash
+python -m src.calibrate_thresholds \
+  --config config/train.yaml --checkpoint checkpoints/best \
+  --split val --test-split test \
+  --override "文字扭曲形变=0.25" \
+  --out eval_results/threshold_calibration.json
+```
+
+标定结果写回 `config/inference.yaml`。当前第一版训练（2026-10-18，2922 条数据）的测试集表现：risk macro-F1 0.622 / L3 recall 0.857，type macro-F1 0.776，injury accuracy 0.812，quality macro-F1 0.456（文字扭曲召回 0.929）。指标解释、数据限制和下一步建议见 `docs/TRAINING_REPORT_2026-10-18.md`。
+
 冒烟权重单独评估时，必须使用冒烟配置与对应 checkpoint，结果写入 `eval_results/smoke/`：
 
 ```powershell
@@ -276,6 +353,12 @@ python -m unittest discover -s tests -v
 ```
 
 测试覆盖标签冲突、缺失掩码、多任务损失、模型头形状、CLIP 调用守卫、API 契约、GLM-OCR、DeepSeek 配置和 RAG 硬关闭；另覆盖 quality 多选解析、BCE 梯度、推理与评估、旧 checkpoint 拒绝，以及冒烟路径隔离和小模型训练保存。测试临时产物自动清理，不加载真实基模训练，也不调用收费 API。
+
+`tests/test_dataset_build.py`（数据配对/清洗/多标签 quality）与 `tests/test_inference_config.py`（推理阈值必须覆盖全部多标签类别）不依赖 torch，可在 CPU 环境直接运行：
+
+```bash
+python -B -m unittest tests.test_dataset_build tests.test_inference_config -v
+```
 
 ## Git 仓库边界
 

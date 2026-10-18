@@ -16,11 +16,11 @@ model:
   path: "fg_clip"
   ckpt_dir: "checkpoints/best"
   device: "cuda"
-  lora: false                 # 未训练联调只加载 FG-CLIP2 原始视觉权重
-  require_checkpoint: false  # 分类头随机初始化，结果仅用于验证流程
+  lora: true                  # 使用 2026-10-18 训练好的 LoRA + 分类头
+  require_checkpoint: true    # 缺少 head.pt / adapter 时拒绝启动
 
 features:
-  ocr_enabled: true
+  ocr_enabled: false          # 拿到 GLM-OCR key 并填入 config/ocr.yaml 后改 true
   lowlevel_enabled: true
   rag_enabled: false          # RAG 尚未实现，本轮不注册该工具
 

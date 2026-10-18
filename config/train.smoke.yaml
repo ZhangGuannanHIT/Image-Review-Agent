@@ -6,8 +6,8 @@ device: "cuda"
 seed: 42
 
 data:
-  json_path: ""                 # 阶段性 Label Studio JSON 路径
-  image_root: ""                # 对应图片的本地根目录
+  json_path: "data/clean/labels.json"   # 冒烟复用清洗后的数据集，只走 1 步优化
+  image_root: "data/clean/images"
   split: [0.85, 0.10, 0.05]
   stratify_key: "risk"
   split_path: "data/smoke/split.json"

@@ -1,7 +1,7 @@
 # ImageGuard 运行说明
 
 以下命令在仓库根目录执行，示例环境为 Windows PowerShell、Python 3.12、NVIDIA GPU。
-前后端独立启动；完成配置后，后端只需运行 `run_backend.py`。
+完成配置后，运行 `run_backend.py` 即可通过同一服务访问前端与后端；也支持前后端独立启动。
 
 ## 1. 安装依赖
 
@@ -56,7 +56,11 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 默认端口 `8000`，健康检查地址：<http://127.0.0.1:8000/health>。返回 `service_ready: true`、`model_loaded: true`、`mock: false` 表示真实模型已就绪。使用 Ctrl+C 停止后端。
 
-## 5. 独立启动前端
+## 5. 打开前端
+
+启动后端后，浏览器打开 <http://127.0.0.1:8000/> 即可使用审核工作台。
+
+也可以独立启动前端：
 
 另开一个终端，在仓库根目录执行：
 
@@ -76,3 +80,11 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 - `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
 
 配置修改后重启后端。
+
+## 本地 RAG
+
+已实现字符 n-gram TF-IDF 检索，无需额外模型或向量数据库。知识库包含 15 条规则、4 条核验案例、1 条教学案例。
+Agent 成功取得视觉证据后，可按需查询相关规则；最终处置继续使用现有程序规则。
+55 条查询用于阈值校准，不代表独立测试或真实图片审核准确率。
+
+详细说明见 [RAG 与前端实现说明](docs/RAG与前端实现说明.md)。

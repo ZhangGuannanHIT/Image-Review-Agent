@@ -18,7 +18,7 @@ def png_bytes() -> bytes:
 
 class GLMOCRTests(unittest.TestCase):
     def test_config_is_glm_ocr(self):
-        config = GLMOCRConfig.from_yaml("config/ocr.yaml")
+        config = GLMOCRConfig.from_yaml("config/ocr.example.yaml")
         self.assertEqual(config.provider, "glm_ocr")
         self.assertEqual(config.model, "glm-ocr")
 

@@ -21,7 +21,7 @@ flowchart TD
     TOOLS --> CLIP[analyze_image / ReviewEngine]
     TOOLS --> OCR[ocr_image / GLM-OCR]
     TOOLS --> LOW[analyze_lowlevel / OpenCV]
-    TOOLS -. 当前关闭 .-> RAG[search_knowledge / Retriever]
+    TOOLS -. 按需检索 .-> RAG[search_knowledge / Retriever]
     TOOLS --> FINAL[finalize_review]
     CLIP --> MODEL[FG-CLIP2 + 可选 LoRA + 四任务头]
     GRAPH --> LOG[JSONL 轨迹日志]
@@ -38,7 +38,7 @@ flowchart TD
 | `analyze_image`    |     必须 | FG-CLIP2 输出四字段基础视觉证据                    |
 | `ocr_image`        |     可选 | 调用智谱 GLM-OCR，提取广告、字幕、标语、水印等文字 |
 | `analyze_lowlevel` |     可选 | 提供红色、模糊、边缘、细密纹理、信息熵提示         |
-| `search_knowledge` | 当前关闭 | RAG 实现后用于检索规则或相似判例                   |
+| `search_knowledge` | 按需调用 | CLIP 成功后检索本地规则与案例，结果仅作辅助证据     |
 | `finalize_review`  | 最终动作 | 提交一句审核建议                                   |
 
 ### 3.2 调用守卫
@@ -86,7 +86,7 @@ degraded             是否降级
 3. Agent 开始 ReAct
 4. Agent 调用 analyze_image
 5. ReviewEngine 读取图片并返回四任务结果
-6. Agent 根据证据选择 GLM-OCR 或低层分析；本轮不注册 RAG
+6. Agent 根据证据选择 GLM-OCR、低层分析或本地 RAG 检索
 7. Agent 调用 finalize_review
 8. 调用守卫检查 clip_succeeded
 9. Service 写入工具轨迹和结构化证据
@@ -179,7 +179,7 @@ Mock 结果必须标记，不用于正式指标。
 
 ### Real
 
-真实模式加载 FG-CLIP2 与 DeepSeek 裁决模型。当前联调配置为 `lora=false`、`require_checkpoint=false`，因此使用原始视觉权重和随机初始化任务头，输出携带 `trained=false`，只能验证流程。训练完成后应恢复 LoRA 并强制 checkpoint。
+真实模式加载 FG-CLIP2 与 DeepSeek，当前配置为 `lora=true`、`require_checkpoint=true`，必须加载训练后的 LoRA 和四任务分类头。Mock 模式用于流程演示，其输出不代表真实模型效果。
 
 ## 10. GLM-OCR 工具架构
 
@@ -236,7 +236,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 受控 StateGraph + CLIP 调用守卫
 ```
 
-当前 `features.rag_enabled=false` 同时作用于工具注册和系统提示词，确保 Agent 无法实际调用尚未实现的 RAG。后续 RAG 推荐使用“FG-CLIP 图像向量 + 四任务结构化摘要 + 可选 OCR 文字”的混合检索，不要求 FG-CLIP 生成其不具备的自然语言图像描述。
+当前 `features.rag_enabled=true`，启用标准库字符 n-gram TF-IDF 检索；关闭时同时移除工具并调整提示词。Agent 根据视觉标签及可选 OCR 文字构造文本查询，不进行图片向量检索。规则库、校准集及使用边界见 [RAG 与前端实现说明](RAG与前端实现说明.md)。最终处置继续遵循现有程序规则。
 
 ## 12. 故障行为
 
@@ -269,7 +269,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 - Mock 端到端流程；
 - GLM-OCR JSON+Base64 请求与版面结果适配；
 - DeepSeek-V4-Flash 独立配置与 LangChain 适配；
-- RAG 工具硬关闭开关；
+- 本地 RAG 规则与案例检索，以及工具启停开关；
 - Python 3.12 + CUDA 12.8 项目虚拟环境与真实基模前向验证；
 - DeepSeek-V4-Flash 真实 Agent 全链路验证；
 - GLM-OCR Base64 data URI 真实接口验证；
@@ -289,7 +289,7 @@ DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
 
 - 最终标注 JSON 与完整图片目录；
 - 正式训练 checkpoint；
-- RAG 判例库。
+- RAG 独立评测查询与知识库持续维护。
 
 ## 14. 仓库与敏感信息边界
 

@@ -10,7 +10,7 @@
   var state = { health: "checking", pending: null, groups: [firstGroup], group: firstGroup, active: null, nextKey: 0, nextGroup: 1, menuGroup: null, renameTarget: null, deleteTarget: null, appearance: savedAppearance, sidebarCollapsed: savedSidebar, currentView: "home", landingScroll: 0, workspaceScroll: 0 };
   var el = {};
   ["skipLink", "landingPage", "landingMain", "landingNav", "landingBrand", "landingWorkspaceLink", "landingThemeButton", "landingThemeIcon", "landingThemeLabel", "landingThemeMenu", "workspaceApp", "sidebar", "closeSidebar", "openSidebar", "sidebarBackdrop", "newWorkspace", "groupCount", "groupList", "groupMenu", "menuRename", "menuDelete", "deleteDialog", "deleteForm", "deleteQuestion", "confirmDelete", "cancelDelete", "closeDelete", "renameDialog", "renameForm", "workspaceName", "closeRename", "cancelRename", "helpButton", "helpDialog", "closeHelp", "dismissHelp", "helpLearnMore", "clearHistory", "historyCount", "historyList", "historyEmpty", "serviceStatus", "serviceText", "healthRetry", "workspaceTitle", "themeButton", "themeIcon", "themeLabel", "themeMenu", "modeBanner", "modeText", "copyAddress", "timelineViewport", "welcome", "welcomeUpload", "timeline", "dropOverlay", "dropZone", "fileInput", "chooseButton", "pendingFile", "pendingPreview", "pendingName", "pendingMeta", "removeFile", "composerHint", "submitButton", "localError", "announcement", "toast"].forEach(function (id) { el[id] = document.getElementById(id); });
-  var API_ADDRESS = (window.REVIEW_API_BASE || "http://127.0.0.1:8000/").replace(/\/?$/, "/");
+  var API_ADDRESS = (window.REVIEW_API_BASE || location.origin).replace(/\/?$/, "/");
   var healthSequence = 0;
   function ready() { return state.health === "ready" || state.health === "mock"; }
   function node(tag, className, text) { var n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
@@ -184,7 +184,7 @@
     el.healthRetry.hidden = !(state.health === "offline" || state.health === "not-ready");
     var preview = state.health === "offline-preview", mock = state.health === "mock";
     el.modeBanner.hidden = !preview && !mock; el.copyAddress.hidden = !preview;
-    el.modeText.textContent = preview ? "本地预览：请通过 HTTP 服务打开前端页面，并启动后端。" : "模拟演示模式：结果仅用于流程联调，不代表真实模型效果。";
+    el.modeText.textContent = preview ? "本地预览：可选图查看界面。启动后端后访问 " + API_ADDRESS + " 进行审核。" : "模拟演示模式：结果仅用于流程联调，不代表真实模型效果。";
     renderControls();
   }
   async function checkHealth() {

@@ -5,7 +5,7 @@
 项目采用 FG-CLIP2 + LLM ReAct Agent。CLIP、OCR、RAG 和低层像素分析都是 Agent Tools：
 
 - `analyze_image` 必须成功调用，调用守卫拒绝无 CLIP 证据的最终提交；
-- GLM-OCR、低层特征是可选工具，RAG 当前硬关闭；
+- GLM-OCR、低层特征和 RAG 是可选工具；RAG 已接入本地规则与案例检索；
 - LLM 不直接看图；
 - API 只返回 `id` 和 `suggestion`。
 
@@ -75,7 +75,7 @@
 7. 在验证集标定 violence type 阈值；
 8. 在独立测试集生成正式指标；
 9. 为前端联调补充跨域代理或明确部署为同源；
-10. 如结题需要，再实现 RAG 判例库；
+10. 为 RAG 补充未参与调参的独立查询，持续维护规则与案例；
 11. 正式上线前增加请求级总超时和明确的 504 语义。
 
 ## 运行
@@ -98,7 +98,7 @@ export OCR_API_KEY="你的智谱 API Key"
 python run_backend.py
 ```
 
-当前 `require_checkpoint=false`，允许随机任务头验证链路，但结果不能作为模型效果。正式训练完成后必须改回 `lora=true`、`require_checkpoint=true` 并指定 checkpoint。
+真实模式已配置为 `lora=true`、`require_checkpoint=true`，需加载 `checkpoints/best/` 中的 LoRA 和分类头。流程演示可设置 `BACKEND_MODE=mock`，不需要使用随机任务头代替训练后的模型。
 
 ## API 联调口径
 
@@ -106,7 +106,7 @@ python run_backend.py
 - 图片/字段错误返回 HTTP 400 `{code, message, id}`；服务未初始化返回 503；
 - 当前没有请求级总超时和 504，前端超时暂建议 120 秒；
 - `/health.mock=false` 仅代表真实视觉引擎，不代表分类头已经训练；
-- RAG 当前未注册给 Agent；
+- RAG 默认注册，取得 CLIP 证据后可按需检索；最终处置仍遵循程序规则；
 - 完整细节以 `docs/api.md` 为准。
 
 ## Git 协作口径

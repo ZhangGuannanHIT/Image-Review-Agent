@@ -160,10 +160,10 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - `analyze_image`（FG-CLIP2）必须成功调用；Agent 提前提交会被调用守卫拒绝。
 - `ocr_image` 和 `analyze_lowlevel` 由 DeepSeek 按需调用。
 - GLM-OCR 只返回文字证据，不承担图片语义裁决。
-- RAG 当前通过配置关闭，`search_knowledge` 不注册给 Agent。
+- RAG 默认启用；取得 CLIP 证据后，Agent 可按需调用 `search_knowledge` 检索本地规则与案例。可通过 `features.rag_enabled=false` 关闭。
 - LLM 不接收原始图片，只接收工具生成的文字证据。
 - 同一请求重复调用 CLIP 使用请求级缓存，不重复执行 GPU 推理。
-- 当前 `require_checkpoint=false` 仅用于跑通流程，随机分类头结果不得作为正式模型效果。
+- 真实模式配置为 `lora=true`、`require_checkpoint=true`，必须加载训练后的 LoRA 和分类头；Mock 模式只用于流程演示。
 
 ## 7. 已验证状态
 
@@ -173,7 +173,7 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - DeepSeek-V4-Flash 能完成工具调用与最终裁决；
 - 一次真实链路为 `analyze_image → analyze_lowlevel → finalize_review`；
 - GLM-OCR 使用 Base64 data URI 的真实请求已成功；
-- RAG 未启用；
+- RAG 已接入本地规则库，检索分数不是违规概率；最终处置沿用程序规则；
 - 自动化测试 48 项通过（含数据集构建与推理配置契约测试）；
 - 上述后端内部变化没有修改前端请求字段和响应结构。
 

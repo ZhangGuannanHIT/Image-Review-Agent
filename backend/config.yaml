@@ -23,7 +23,7 @@ model:
 features:
   ocr_enabled: true
   lowlevel_enabled: true
-  rag_enabled: false          # RAG 尚未实现，本轮不注册该工具
+  rag_enabled: true           # 启用本地规则与案例检索，无额外服务依赖
 
 # ReAct agent 配置（LLM 为核心）
 agent:

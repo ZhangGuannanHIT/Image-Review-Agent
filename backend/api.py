@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import io
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
 
 from .schemas import ErrorResponse, HealthResponse, ReviewResponse
 from .service import ReviewService
@@ -26,6 +28,7 @@ app.add_middleware(
 _service: Optional[ReviewService] = None
 _max_image_bytes = 10 * 1024 * 1024
 _allowed_formats = {"JPEG", "PNG", "WEBP"}
+_FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
 
 
 class APIError(Exception):
@@ -52,14 +55,57 @@ def init_service(service: ReviewService, max_image_mb: int = 10) -> ReviewServic
     return service
 
 
+def _serve_static(filename: str, media_type: str) -> Response:
+    """只提供前端目录下固定的静态文件，避免暴露其他路径。"""
+    allowed = {"index.html", "styles.css", "landing.css", "config.js", "app.js"}
+    if filename not in allowed:
+        raise APIError(404, 50000, "资源不存在")
+    path = _FRONTEND_DIR / filename
+    if not path.is_file():
+        raise APIError(404, 50000, "资源不存在")
+    return Response(content=path.read_bytes(), media_type=media_type)
+
+
+@app.get("/", include_in_schema=False)
+def index() -> HTMLResponse:
+    path = _FRONTEND_DIR / "index.html"
+    if not path.is_file():
+        raise APIError(404, 50000, "前端页面不存在")
+    return HTMLResponse(content=path.read_text(encoding="utf-8"))
+
+
+@app.get("/styles.css", include_in_schema=False)
+def styles() -> Response:
+    return _serve_static("styles.css", "text/css")
+
+
+@app.get("/landing.css", include_in_schema=False)
+def landing_styles() -> Response:
+    return _serve_static("landing.css", "text/css")
+
+
+@app.get("/app.js", include_in_schema=False)
+def app_js() -> Response:
+    return _serve_static("app.js", "text/javascript")
+
+
+@app.get("/config.js", include_in_schema=False)
+def frontend_config() -> Response:
+    return _serve_static("config.js", "text/javascript")
+
+
 def _validate_image(data: bytes, request_id: str) -> None:
     try:
         with Image.open(io.BytesIO(data)) as image:
             if image.format not in _allowed_formats:
                 raise APIError(400, 40001, "仅支持 jpg、png、webp 图片", request_id)
+            if Image.MAX_IMAGE_PIXELS and image.width * image.height > Image.MAX_IMAGE_PIXELS:
+                raise APIError(400, 40001, "图片像素尺寸过大", request_id)
             image.verify()
     except APIError:
         raise
+    except DecompressionBombError as exc:
+        raise APIError(400, 40001, "图片像素尺寸过大", request_id) from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise APIError(400, 40001, "无法解析图片文件", request_id) from exc
 

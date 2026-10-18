@@ -22,6 +22,10 @@
 - JPG/PNG/WEBP，单张不超过 10MB；后端校验为最终依据。
 - Mock 标志固定显示在顶部，每条记录保留提交时的模式标记。
 
+## 独立启动
+
+通过本机 HTTP 静态服务独立启动前端时，在 `config.js` 的 `window.REVIEW_API_BASE` 中设置后端地址。后端允许 localhost 和 127.0.0.1 的 HTTP 前端跨端口访问。
+
 ## 接口
 
 仅使用 GET /health 和 POST /api/review。审核上传字段为 image，成功响应为 {id, suggestion}，错误响应读取 code、message、id。不推测风险等级或工具调用轨迹。

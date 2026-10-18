@@ -8,6 +8,7 @@ analyze_image 必须成功执行；其余证据工具由 ReAct Agent 按需选�
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -43,6 +44,12 @@ def get_request_context() -> RequestToolContext:
     if context is None or not context.image:
         raise RuntimeError("当前审核请求没有可用图片")
     return context
+
+
+def knowledge_cache_key(query: str) -> str:
+    """用查询摘要作为缓存键，避免 OCR 原文进入日志。"""
+    digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+    return f"search_knowledge:{digest}"
 
 
 def _as_dict(output: Any) -> dict[str, Any]:
@@ -145,13 +152,15 @@ def build_tools(
 
     @tool
     def search_knowledge(query: str) -> str:
-        """可选。需要审核规则或相似判例佐证时调用；知识库为空时返回无相似判例。"""
+        """可选。在取得 CLIP 证据后，按原样标签、置信度和 OCR 文字检索规则或判例；不得添加未观察到的图片事实。"""
         context = get_request_context()
-        cache_key = f"search_knowledge:{query}"
+        if "analyze_image_text" not in context.cache:
+            raise RuntimeError("必须先成功调用 analyze_image，才能检索规则或判例")
+        cache_key = knowledge_cache_key(query)
         if cache_key not in context.cache:
             context.cache[cache_key] = retrieve(query, k=5)
         cases = context.cache[cache_key]
-        return "无相似判例" if not cases else json.dumps(cases, ensure_ascii=False)
+        return "未检索到相关规则或判例" if not cases else json.dumps(cases, ensure_ascii=False)
 
     @tool
     def finalize_review(suggestion: str) -> str:

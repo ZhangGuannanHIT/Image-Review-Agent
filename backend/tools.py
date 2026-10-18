@@ -16,6 +16,7 @@ from langchain_core.tools import BaseTool, tool
 
 from . import lowlevel as lowlevel_mod
 from . import rag as rag_mod
+from .vision import VisionGate, trigger
 
 
 @dataclass
@@ -62,17 +63,14 @@ def _as_dict(output: Any) -> dict[str, Any]:
 def text_evidence(output: Any) -> str:
     """把冻结标签体系下的结构化视觉输出转成 LLM 证据。"""
     data = _as_dict(output)
-    risk = data.get("risk", {})
-    violence = data.get("type", {})
-    injury = data.get("injury", {})
-    quality = data.get("quality", {})
     return (
-        f"违规等级: {risk.get('label', '')} (置信度 {float(risk.get('confidence', 0)):.2f}) | "
-        f"暴力类型: {violence.get('labels', [])} | "
-        f"血腥程度: {injury.get('label', '')} (置信度 {float(injury.get('confidence', 0)):.2f}) | "
-        f"图像质量（多标签）: {quality.get('labels', [])} (各类概率 {quality.get('scores', {})}) | "
-        f"审核头已训练: {bool(data.get('trained', False))}"
+        "以下是模型预测，类别括号内是标签定义，不是观察到的具体事实。分数未经概率校准。"
+        "type（暴力类型）和 quality（图像质量）为多标签，risk 和 injury 为单标签。"
+        "无暴力仅指无正在进行的暴力行为，可以与血腥、后果展示和暗示威胁共存。"
+        "保留各类分数与阈值供比较，不能只凭最高类别断言存在伤口或血泊："
+        + json.dumps(data, ensure_ascii=False)
     )
+
 
 
 def build_tools(
@@ -83,9 +81,28 @@ def build_tools(
     enable_ocr: bool = True,
     enable_lowlevel: bool = True,
     enable_rag: bool = True,
+    vision_client: Any = None,
+    vision_gate: VisionGate | None = None,
 ) -> list[BaseTool]:
     """构造请求工具；依赖通过闭包捕获，不使用模块级共享服务。"""
     retrieve = retriever or rag_mod.retrieve
+    gate = vision_gate or VisionGate()
+
+    @tool
+    def review_blood() -> str:
+        """仅复核低可信血腥候选。必须先完成 CLIP；程序检查分数/分差，不满足则禁止发送图片。"""
+        context = get_request_context()
+        condition = trigger(context.cache.get("analyze_image", {}), gate)
+        if not condition["eligible"]:
+            return json.dumps({"status": "skipped", "trigger": condition}, ensure_ascii=False)
+        if "review_blood" not in context.cache:
+            try:
+                result = vision_client.review(context.image) if vision_client else {
+                    "status": "failed", "verdict": "uncertain", "error": "not_configured"}
+            except Exception as exc:
+                result = {"status": "failed", "verdict": "uncertain", "error": type(exc).__name__}
+            context.cache["review_blood"] = {**result, "trigger": condition}
+        return json.dumps(context.cache["review_blood"], ensure_ascii=False)
 
     @tool
     def analyze_image() -> str:
@@ -95,7 +112,10 @@ def build_tools(
             output = engine.predict(context.image)
             context.cache["analyze_image"] = _as_dict(output)
             context.cache["analyze_image_text"] = text_evidence(output)
-        return context.cache["analyze_image_text"]
+        content = context.cache["analyze_image_text"]
+        if vision_client and trigger(context.cache["analyze_image"], gate)["eligible"]:
+            content += "\n程序按触发条件调用 review_blood 的独立复核结果：" + review_blood.invoke({})
+        return content
 
     @tool
     def ocr_image() -> str:
@@ -117,7 +137,7 @@ def build_tools(
 
     @tool
     def analyze_lowlevel() -> str:
-        """可选。CLIP 低置信、结果矛盾或怀疑红色、模糊、打码、密集纹理时调用；仅提供像素提示，不做裁决。"""
+        """可选。需要颜色、边缘、方差等数值时调用；不识别血腥、遮挡或违规。"""
         context = get_request_context()
         if "analyze_lowlevel" not in context.cache:
             context.cache["analyze_lowlevel"] = lowlevel_mod.extract(context.image)
@@ -139,6 +159,8 @@ def build_tools(
         return suggestion.strip()
 
     tools: list[BaseTool] = [analyze_image]
+    if vision_client:
+        tools.append(review_blood)
     if enable_ocr:
         tools.append(ocr_image)
     if enable_lowlevel:

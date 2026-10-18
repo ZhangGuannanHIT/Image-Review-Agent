@@ -29,7 +29,7 @@ from PIL import Image
 
 # 初始阈值（可在 _THRESHOLDS 整体调整标定）
 _THRESHOLDS = {
-    "red_ratio": 0.25,         # 红色占比超此为"疑似血腥"提示
+    "red_ratio": 0.25,         # 仅供像素统计分流
     "blur_score": 80.0,        # 拉普拉斯方差低于此为"较模糊"
     "edge_density": 0.12,      # 边缘密度超此为"密集纹理/疑似打码"
     "text_region_ratio": 0.30, # 文字密集度弱提示阈值（边缘密度代理；仅在"全图文字密集"才提示，交 OCR；宁少报）
@@ -80,7 +80,7 @@ def extract(image: Union[bytes, "Image.Image", np.ndarray]) -> dict:
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     total = float(gray.size)
 
-    # 1) 红色占比（血腥）
+    # 1) HSV 红区占比（包含部分暖色，不代表血腥）
     red_mask = np.zeros_like(gray, dtype=np.uint8)
     for lo, hi in _RED_HSV:
         red_mask |= cv2.inRange(hsv, lo, hi)
@@ -130,20 +130,13 @@ def _text_region_ratio(image: Union[bytes, "Image.Image", np.ndarray]) -> float:
 
 def to_text(feats: dict) -> str:
     """把特征转成 LLM 可直接读的可读文本，仅输出"提示"不输出结论。"""
-    flags: list[str] = []
-    if feats["red_ratio"] > _THRESHOLDS["red_ratio"]:
-        flags.append(f"红色占比高({feats['red_ratio']:.2f})，疑似血腥/红色醒目元素")
-    if feats["blur_score"] < _THRESHOLDS["blur_score"]:
-        flags.append(f"画面较模糊(方差{feats['blur_score']:.0f})")
-    if feats["edge_density"] > _THRESHOLDS["edge_density"]:
-        flags.append(f"边缘密度高({feats['edge_density']:.2f})，疑似打码/密集纹理")
-    if feats["text_region_ratio"] > _THRESHOLDS["text_region_ratio"]:
-        flags.append(f"画面细节/文字密集度异常高({feats['text_region_ratio']:.2f})，疑似含大量文字，建议 OCR 确认")
-    if feats["entropy"] < _THRESHOLDS["entropy"]:
-        flags.append(f"信息熵偏低({feats['entropy']:.2f})，疑似过度压缩/截图")
-    if not flags:
-        return "低层特征未见明显异常（红色/模糊/边缘/文字/熵均正常）"
-    return "低层特征提示: " + "；".join(flags)
+    return (
+        f"像素统计（不能据此推断内容）：HSV 红区占比 {feats['red_ratio']:.4f}；"
+        f"拉普拉斯方差 {feats['blur_score']:.2f}；边缘密度 {feats['edge_density']:.4f}；"
+        f"文字/纹理代理值 {feats['text_region_ratio']:.4f}；灰度信息熵 {feats['entropy']:.3f}。"
+        "颜色不证明或排除血腥；边缘密度不证明马赛克或遮挡；低方差和低熵也可能来自纯色或插画。"
+        "这些统计不构成违规证据，不得升级风险或处置。"
+    )
 
 
 # ---- 路由辅助：仅供 Router 前置分流，不参与 LLM 裁决 ----

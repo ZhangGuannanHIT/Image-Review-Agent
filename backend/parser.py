@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-FALLBACK_SUGGESTION = "未能生成审核建议，请人工复核。"
+FALLBACK_SUGGESTION = "未能生成审核建议，请稍后重试。"
 
 
 def extract_suggestion(result: dict[str, Any]) -> str:

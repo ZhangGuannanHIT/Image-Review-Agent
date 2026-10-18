@@ -7,17 +7,18 @@ server:
   max_image_mb: 10
 
 runtime:
-  mode: "real"          # 当前进行真实基模全流程联调
+  mode: "real"          # 使用 2026-10-18 导入的 LoRA 与分类头
 
 ocr_config_path: "config/ocr.yaml"
 llm_config_path: "config/llm.yaml"
+inference_config_path: "config/inference.yaml"  # 本轮训练标定的多标签阈值
 
 model:
   path: "fg_clip"
   ckpt_dir: "checkpoints/best"
   device: "cuda"
-  lora: false                 # 未训练联调只加载 FG-CLIP2 原始视觉权重
-  require_checkpoint: false  # 分类头随机初始化，结果仅用于验证流程
+  lora: true                 # 加载训练后的视觉 LoRA adapter
+  require_checkpoint: true   # 必须同时加载 LoRA adapter 与分类头
 
 features:
   ocr_enabled: true
@@ -30,4 +31,17 @@ agent:
   on_tool_fail: "skip"   # 可选工具失败: skip | abort
 
 log_dir: "backend/logs"
+
+# 血腥单头的临时业务门槛，未重新标定；风险保留 argmax，类型使用 inference.yaml。
+decision_policy:
+  min_injury_confidence: 0.75
+  min_injury_margin: 0.20
+audit:
+  save_images: true
+
+vision_review:
+  enabled: true
+  trigger:
+    max_confidence: 0.65
+    min_margin: 0.20
 

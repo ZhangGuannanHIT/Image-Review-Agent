@@ -1,13 +1,21 @@
-# 单图推理配置。正式审核仍以 backend/config.yaml 为启动入口。
+# 推理参数。后端通过 inference_config_path 读取本文件的多标签阈值。
+# 后端模型路径、设备和 checkpoint 开关仍由 backend/config.yaml 决定。
 model_path: "fg_clip"
 ckpt_dir: "checkpoints/best"
 device: "cuda"
 lora: true
 strict_load: true
 
-# 多标签阈值最终需在验证集上标定，当前统一使用 0.5。
+# 来源：2026-10-18 训练包 eval/threshold_calibration.json 中的 applied。
 type_thresholds:
-  "无暴力": 0.5
-  "直接暴力（攻击进行中）": 0.5
-  "后果展示（尸体/伤口）": 0.5
-  "暗示/威胁（武器指向/捆绑）": 0.5
+  "无暴力": 0.45
+  "直接暴力（攻击进行中）": 0.60
+  "后果展示（尸体/伤口）": 0.60
+  "暗示/威胁（武器指向/捆绑）": 0.90
+
+quality_thresholds:
+  "清晰": 0.35
+  "轻微模糊": 0.30
+  "严重模糊": 0.55
+  "文字扭曲形变": 0.25  # 训练包采用的召回优先人工覆盖值
+  "故意遮挡（马赛克/黑条/贴纸）": 0.50

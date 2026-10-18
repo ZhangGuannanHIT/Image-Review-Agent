@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -98,6 +99,8 @@ def _parse_response(payload: dict[str, Any], config: GLMOCRConfig) -> dict[str, 
         boxes.append(list(box) if isinstance(box, list) and len(box) == 4 else [])
 
     markdown = str(payload.get("md_results", "") or "").strip()
+    markdown = re.sub(r"!\[[^\]]*\]\([^\n]*?\)", "", markdown)
+    markdown = re.sub(r"<img\b[^>]*>", "", markdown, flags=re.IGNORECASE).strip()
     if not texts and markdown:
         texts = [markdown]
 

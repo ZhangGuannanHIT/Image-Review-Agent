@@ -6,6 +6,13 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import hashlib
+import time
+import io
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from PIL import Image
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -15,6 +22,8 @@ from .agent import build_agent
 from .parser import extract_suggestion
 from .prompts import build_system_prompt
 from .schemas import ReviewResponse
+from .policy import DecisionPolicy, decide, render
+from .vision import VisionGate
 
 
 class ReviewService:
@@ -31,6 +40,10 @@ class ReviewService:
         ocr_enabled: bool = True,
         lowlevel_enabled: bool = True,
         rag_enabled: bool = True,
+        decision_policy: dict | None = None,
+        save_images: bool = True,
+        vision_client: Any = None,
+        vision_gate: dict | None = None,
     ):
         self.llm_model = llm_model
         self.engine = engine
@@ -42,6 +55,8 @@ class ReviewService:
             enable_ocr=ocr_enabled,
             enable_lowlevel=lowlevel_enabled,
             enable_rag=rag_enabled,
+            vision_client=vision_client,
+            vision_gate=VisionGate(**(vision_gate or {})),
         )
         self.agent = build_agent(
             llm_model,
@@ -54,6 +69,19 @@ class ReviewService:
         self.max_rounds = max_rounds
         self.mock_mode = mock_mode
         self.rag_enabled = rag_enabled
+        self.policy = DecisionPolicy(**(decision_policy or {}))
+        self.save_images = save_images
+        self.model_identity = {"checkpoint": str(getattr(engine, "ckpt_dir", "")),
+                               "trained": bool(getattr(engine, "trained", False)),
+                               "type_thresholds": getattr(engine, "type_thresholds", {}),
+                               "quality_thresholds": getattr(engine, "quality_thresholds", {})}
+        checkpoint = self.model_identity["checkpoint"]
+        if checkpoint:
+            self.model_identity["sha256"] = {
+                name: hashlib.sha256((Path(checkpoint) / name).read_bytes()).hexdigest()
+                for name in ("head.pt", "adapter_model.safetensors", "labels.json")
+                if (Path(checkpoint) / name).is_file()
+            }
         os.makedirs(log_dir, exist_ok=True)
 
     @property
@@ -66,14 +94,29 @@ class ReviewService:
             file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
     def review(self, image_bytes: bytes, filename: str = "") -> ReviewResponse:
+        started = time.monotonic()
         request_id = uuid.uuid4().hex
         token = tools_mod.set_current_image(image_bytes)
         log: dict[str, Any] = {
             "request_id": request_id,
             "filename": filename,
             "mock": self.mock_mode,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
+            "model": self.model_identity,
+            "decision_policy": asdict(self.policy),
         }
         try:
+            if self.save_images:
+                image_dir = Path(self.log_dir) / "images"
+                image_dir.mkdir(parents=True, exist_ok=True)
+                # 用服务生成的编号命名，不把上传文件名当路径。
+                with Image.open(io.BytesIO(image_bytes)) as original:
+                    extension = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp",
+                                 "GIF": ".gif", "BMP": ".bmp"}.get(original.format, ".image")
+                image_path = image_dir / f"{request_id}{extension}"
+                image_path.write_bytes(image_bytes)
+                log["image_path"] = str(image_path.resolve())
             result = self.agent.invoke(
                 {
                     "messages": [HumanMessage(content="请审核当前图片。")],
@@ -93,6 +136,18 @@ class ReviewService:
             )
             suggestion = extract_suggestion(result)
             context = tools_mod.get_request_context()
+            log["agent_suggestion"] = suggestion
+            if result.get("clip_succeeded") and "analyze_image" in context.cache:
+                decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
+                suggestion = render(decision)
+                log["decision"] = decision
+            log["evidence_text"] = context.cache.get("analyze_image_text", "")
+            log["messages"] = [
+                {"type": message.type, "name": getattr(message, "name", None),
+                 "content": message.content,
+                 "tool_calls": getattr(message, "tool_calls", [])}
+                for message in result.get("messages", [])
+            ]
             log.update({
                 "clip_called": result.get("clip_called", False),
                 "clip_succeeded": result.get("clip_succeeded", False),
@@ -102,15 +157,23 @@ class ReviewService:
                 "tool_cache_keys": sorted(context.cache.keys()),
                 "steps": result.get("steps", []),
                 "suggestion": suggestion,
+                "elapsed_ms": round((time.monotonic() - started) * 1000),
             })
             self._log(log)
             return ReviewResponse(id=request_id, suggestion=suggestion)
         except Exception as exc:  # noqa: BLE001
             suggestion = "审核流程暂不可用，无法完成本次审核，请稍后重试。"
+            context = tools_mod.get_request_context()
+            if "analyze_image" in context.cache:
+                decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
+                suggestion = render(decision)
+                log["decision"] = decision
             log.update({
                 "error": f"{type(exc).__name__}: {exc}",
                 "degraded": True,
                 "suggestion": suggestion,
+                "tool_cache": context.cache,
+                "elapsed_ms": round((time.monotonic() - started) * 1000),
             })
             self._log(log)
             return ReviewResponse(id=request_id, suggestion=suggestion)

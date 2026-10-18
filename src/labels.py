@@ -25,7 +25,7 @@ RISK_LABEL_TEXT = {
 # 类名 = JSON 枚举中的" / "符号保留，确保与 Label Studio 值对齐。
 TYPE_CLASSES = [
     "无暴力", "直接暴力（攻击进行中）", "后果展示（尸体/伤口）", "暗示/威胁（武器指向/捆绑）",
-]  # 可多选
+]  # 可多选；无暴力指无正在进行的暴力，可与后果展示、威胁、任意血腥程度共存。
 
 # ==== injury_detail（choices 单选，4 档）====
 INJURY_CLASSES = [

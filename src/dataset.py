@@ -115,7 +115,7 @@ def _encode_multihot(values: list[str], classes: list[str]) -> tuple[list[int], 
     return mask, (";".join(unmapped) if unmapped else "")
 
 
-# ---- 清洗规则：violence_type 含"无暴力"+其他类 → 整条剔除 ----
+# ---- 清洗规则：violence_type 含"无暴力"+正在进行的直接暴力 → 整条剔除 ----
 def _canonical_type(value: str) -> Optional[str]:
     """把 Label Studio 的完整说明值映射到冻结的类型标签。"""
     clean = value.strip()
@@ -128,7 +128,7 @@ def _canonical_type(value: str) -> Optional[str]:
 def _is_conflict(values: list[str]) -> bool:
     normalized = {_canonical_type(v) for v in values}
     normalized.discard(None)
-    return "无暴力" in normalized and len(normalized) > 1
+    return "无暴力" in normalized and "直接暴力（攻击进行中）" in normalized
 
 
 def _resolve_image_path(image_uri: str, file_upload: Optional[str], image_root: str) -> tuple[str, bool]:
@@ -211,10 +211,8 @@ def parse_label_studio(
         normalized_types = {_canonical_type(v) for v in type_vals}
         if risk_label and risk_label.startswith("L0") and "直接暴力（攻击进行中）" in normalized_types:
             conflicts.append((task_id, "L0_安全 却标 直接暴力", parsed))
-        if risk_label and risk_label.startswith("L3") and "无暴力" in type_vals:
-            conflicts.append((task_id, "L3_严重 却标 无暴力", parsed))
 
-        # --- 清洗：violence_type 含"无暴力"+其他类 → 整条剔除 ---
+        # --- 清洗：violence_type 含"无暴力"+正在进行的直接暴力 → 整条剔除 ---
         if _is_conflict(type_vals):
             removed_conflict.append(task_id)
             continue

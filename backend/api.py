@@ -10,12 +10,19 @@ from typing import Optional
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 
 from .schemas import ErrorResponse, HealthResponse, ReviewResponse
 from .service import ReviewService
 
 app = FastAPI(title="违规内容审核系统", version="0.4")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"http://(?:localhost|127\.0\.0\.1)(?::[0-9]+)?",
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 _service: Optional[ReviewService] = None
 _max_image_bytes = 10 * 1024 * 1024
 _allowed_formats = {"JPEG", "PNG", "WEBP"}

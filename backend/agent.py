@@ -76,8 +76,16 @@ def build_agent(
                     tool_results[name] = suggestion
                 else:
                     tool_results[name] = context.cache.get(cache_name, content)
-                steps.append({"type": "tool_call", "name": name, "cached": cached_before, "ok": True})
+                steps.append({"type": "tool_call", "name": name, "cached": cached_before, "ok": True, "args": args, "output": content})
+                if name == "analyze_image" and "review_blood" in context.cache:
+                    review = context.cache["review_blood"]
+                    tool_results["review_blood"] = review
+                    steps.append({"type": "tool_call", "name": "review_blood", "automatic": True,
+                                  "cached": cached_before, "ok": review.get("status") == "ok",
+                                  "args": {}, "output": review})
                 output_messages.append(ToolMessage(content=content, tool_call_id=call_id, name=name))
+                if finalized:
+                    break
             except Exception as exc:  # noqa: BLE001
                 content = f"工具 {name} 调用失败: {type(exc).__name__}: {exc}"
                 if name == "analyze_image":
@@ -110,13 +118,13 @@ def build_agent(
     def implicit_finalize(state: ReviewState) -> dict:
         last = state.get("messages", [])[-1]
         content = str(getattr(last, "content", "") or "").strip()
-        return {"suggestion": content or "视觉证据已取得，建议人工复核。", "finalized": True}
+        return {"suggestion": content or "视觉证据已取得，由程序处置规则生成结论。", "finalized": True}
 
     def limit_finalize(state: ReviewState) -> dict:
         if state.get("clip_succeeded"):
             evidence = state.get("tool_results", {}).get("analyze_image", {})
             risk = evidence.get("risk", {}).get("label", "未知等级") if isinstance(evidence, dict) else "未知等级"
-            suggestion = f"视觉模型判定为{risk}；Agent 已达到最大轮次，建议人工复核后处置。"
+            suggestion = f"视觉模型判定为{risk}；Agent 已达到最大轮次，由程序处置规则生成结论。"
         else:
             suggestion = "未能取得 CLIP 视觉证据，无法完成图片审核，请稍后重试。"
         return {"suggestion": suggestion, "finalized": True, "degraded": True}

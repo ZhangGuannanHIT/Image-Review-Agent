@@ -29,8 +29,10 @@ def load_config(path="backend/config.yaml"):
 
 
 def main():
+    os.chdir(_REPO_ROOT)
     cfg = load_config()
     mode = cfg.get("runtime", {}).get("mode", "real")
+    vision_client = None
     from backend.service import ReviewService
     from backend.api import init_service
 
@@ -43,6 +45,13 @@ def main():
         from src.engine import ReviewEngine
         from backend.ocr import OCRClient
         from backend.llm import LLMClient
+        inference_cfg = {}
+        inference_path = cfg.get("inference_config_path")
+        if inference_path:
+            if not os.path.isabs(inference_path):
+                inference_path = os.path.join(_REPO_ROOT, inference_path)
+            with open(inference_path, "r", encoding="utf-8") as file:
+                inference_cfg = yaml.safe_load(file) or {}
         model_path = os.path.join(_REPO_ROOT, cfg["model"]["path"])
         engine = ReviewEngine(
             model_path,
@@ -50,6 +59,8 @@ def main():
             device=cfg["model"]["device"],
             lora=cfg["model"].get("lora", True),
             strict_load=True,
+            type_thresholds=inference_cfg.get("type_thresholds"),
+            quality_thresholds=inference_cfg.get("quality_thresholds"),
         )
         if cfg["model"].get("require_checkpoint", True) and not engine.trained:
             raise RuntimeError("真实模式需要已训练的 checkpoint（LoRA adapter + head.pt）")
@@ -62,6 +73,9 @@ def main():
             llm_config_path = os.path.join(_REPO_ROOT, llm_config_path)
         llm_client = LLMClient.from_config(llm_config_path)
         llm_model = llm_client.build_model()
+        if cfg.get("vision_review", {}).get("enabled", False):
+            from backend.vision import DeepSeekBloodReviewer
+            vision_client = DeepSeekBloodReviewer(llm_client.config)
     else:
         raise ValueError(f"不支持的 runtime.mode: {mode}")
 
@@ -74,7 +88,11 @@ def main():
         mock_mode=mode == "mock",
         ocr_enabled=features.get("ocr_enabled", True),
         lowlevel_enabled=features.get("lowlevel_enabled", True),
-        rag_enabled=features.get("rag_enabled", True))
+        rag_enabled=features.get("rag_enabled", True),
+        decision_policy=cfg.get("decision_policy"),
+        vision_client=vision_client,
+        vision_gate=cfg.get("vision_review", {}).get("trigger"),
+        save_images=cfg.get("audit", {}).get("save_images", True))
 
     init_service(service, max_image_mb=cfg["server"].get("max_image_mb", 10))
 

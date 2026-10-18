@@ -46,6 +46,17 @@ def image_bytes() -> bytes:
 
 
 class AgentAndAPITests(unittest.TestCase):
+    def test_separate_local_frontend_cors(self):
+        client = TestClient(app)
+        for origin in ["http://127.0.0.1:5500", "http://localhost:5500"]:
+            response = client.options("/api/review", headers={
+                "Origin": origin, "Access-Control-Request-Method": "POST"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["access-control-allow-origin"], origin)
+        denied = client.options("/api/review", headers={
+            "Origin": "http://example.com", "Access-Control-Request-Method": "POST"})
+        self.assertNotIn("access-control-allow-origin", denied.headers)
+
     def make_service(self, model=None):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -57,7 +68,13 @@ class AgentAndAPITests(unittest.TestCase):
     def test_clip_guard_rejects_early_finalize(self):
         service = self.make_service(FinalizeFirstModel())
         result = service.review(image_bytes(), "test.png")
-        self.assertEqual(result.suggestion, "守卫测试通过，建议人工复核。")
+        self.assertIn("处置：放行", result.suggestion)
+        import json
+        from pathlib import Path
+        log = json.loads((Path(self.temp.name) / "review.log.jsonl").read_text(encoding="utf-8"))
+        self.assertTrue(any(step["type"] == "guard_reject" for step in log["steps"]))
+        self.assertTrue(log["clip_succeeded"])
+        self.assertEqual(log["agent_suggestion"], "守卫测试通过，建议人工复核。")
 
     def test_api_contract_and_validation(self):
         init_service(self.make_service(), max_image_mb=1)

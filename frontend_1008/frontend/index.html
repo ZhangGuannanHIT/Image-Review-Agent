@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ImageGuard · 多模态图片内容审核</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./landing.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a id="skipLink" class="skip-link" href="#landingMain">跳到主要内容</a>
+
+  <div id="landingPage" class="landing-page">
+    <header id="landingNav" class="landing-nav">
+      <a id="landingBrand" class="landing-brand" href="#home" aria-label="返回 ImageGuard 展示页顶部"><span class="landing-brand-mark" aria-hidden="true">IG</span><span><strong>ImageGuard</strong><small>图片内容辅助审核</small></span></a>
+      <nav class="landing-links" aria-label="展示页导航">
+        <a href="#principles">设计原则</a><a href="#workflow">审核流程</a><a href="#boundaries">数据边界</a><a href="#usage">使用说明</a>
+      </nav>
+      <div class="landing-actions">
+        <div class="theme-control">
+          <button id="landingThemeButton" class="theme-button" type="button" aria-label="选择页面外观，当前为跟随系统" aria-controls="landingThemeMenu" aria-expanded="false"><span id="landingThemeIcon" aria-hidden="true"></span><span id="landingThemeLabel" class="sr-only">跟随系统</span></button>
+          <div id="landingThemeMenu" class="theme-menu" role="menu" aria-label="页面外观" hidden>
+            <button class="theme-option" type="button" role="menuitemradio" data-theme-value="system" aria-checked="true"><span class="theme-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><span>跟随系统</span></button>
+            <button class="theme-option" type="button" role="menuitemradio" data-theme-value="light" aria-checked="false"><span class="theme-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span><span>日间</span></button>
+            <button class="theme-option" type="button" role="menuitemradio" data-theme-value="dark" aria-checked="false"><span class="theme-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"/></svg></span><span>夜间</span></button>
+          </div>
+        </div>
+        <a id="landingWorkspaceLink" class="landing-workspace-link" href="#workspace">进入工作台</a>
+      </div>
+    </header>
+
+    <main id="landingMain" tabindex="-1">
+      <section id="overview" class="landing-hero" aria-labelledby="heroTitle">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="hero-kicker">MULTIMODAL REVIEW AGENT</p>
+            <h1 id="heroTitle">让图片内容审核<br>清晰、快速、可追溯</h1>
+            <p class="hero-summary">以视觉证据为基础，由审核智能体按需调用文字识别与规则检索，为运营人员生成可复核的处理建议。</p>
+            <div class="hero-actions"><a class="hero-primary" href="#workspace">进入审核工作台</a><a class="hero-secondary" href="#workflow">查看审核流程 <span aria-hidden="true">↓</span></a></div>
+          </div>
+          <div class="hero-system">
+            <div class="hero-node node-vision"><span></span><strong>FG-CLIP2</strong><small>视觉证据</small></div>
+            <div class="hero-node node-tools"><span></span><strong>OCR · RAG</strong><small>按需取证</small></div>
+            <svg class="hero-flow-lines" viewBox="0 0 560 210" preserveAspectRatio="none" aria-hidden="true"><path d="M92 42 C122 96 190 106 244 150"/><path d="M468 42 C438 96 370 106 316 150"/><path d="M244 150h72"/></svg>
+            <article class="hero-result">
+              <div class="hero-result-heading"><div><span class="hero-result-mark" aria-hidden="true">IG</span><strong>审核建议</strong></div><span>示例输出</span></div>
+              <p>图片内容需要结合文字语境进一步确认，建议进入人工复核。</p>
+              <div class="hero-result-meta"><span>审核编号</span><code>review-7F3A</code><span class="trace-badge">可追溯</span></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="principles" class="landing-section principles-section" aria-labelledby="principlesTitle">
+        <div class="section-intro"><span>DESIGN PRINCIPLES</span><h2 id="principlesTitle">让模型能力服务于审核判断</h2><p>系统不追求一次调用所有工具，而是围绕证据、效率与人工责任组织审核过程。</p></div>
+        <div class="principle-list">
+          <article><h3>视觉证据优先</h3><p>先从图片本身提取内容证据，保持判断与原始材料之间的联系。</p></article>
+          <article><h3>工具按需调用</h3><p>只有需要读取文字或核对规则时，智能体才调用 OCR 与轻量检索。</p></article>
+          <article><h3>人工保留最终判断</h3><p>系统输出辅助建议与审核编号，不替代运营人员作出最终决定。</p></article>
+        </div>
+      </section>
+
+      <section id="workflow" class="landing-section workflow-section" aria-labelledby="workflowTitle">
+        <div class="section-intro"><span>REVIEW WORKFLOW</span><h2 id="workflowTitle">一次审核请求如何完成</h2><p>每张图片独立处理；上一张图片和结果不会成为下一次请求的上下文。</p></div>
+        <ol class="workflow-list">
+          <li class="is-human"><span>01</span><div><h3>提交图片</h3><p>从本地选择、拖入工作区或直接粘贴截图。</p></div></li>
+          <li><span>02</span><div><h3>提取视觉证据</h3><p>FG-CLIP2 对图片内容进行基础视觉分析。</p></div></li>
+          <li><span>03</span><div><h3>判断取证需求</h3><p>智能体判断是否需要识别文字或检索相关规则。</p></div></li>
+          <li><span>04</span><div><h3>综合多源证据</h3><p>整理视觉、文字与规则片段，形成可复核的依据。</p></div></li>
+          <li><span>05</span><div><h3>生成审核建议</h3><p>返回处理建议与可追溯审核编号。</p></div></li>
+          <li class="is-human"><span>06</span><div><h3>人工复核</h3><p>运营人员结合实际业务规则确认最终结论。</p></div></li>
+        </ol>
+        <p class="workflow-note"><strong>轻量 RAG：</strong>当前规则知识规模较小，采用轻量检索减少部署复杂度，并为后续扩展保留接口。</p>
+      </section>
+
+      <section id="boundaries" class="landing-section boundary-section" aria-labelledby="boundaryTitle">
+        <div class="section-intro"><span>DATA BOUNDARIES</span><h2 id="boundaryTitle">能力分层，数据流向明确</h2><p>组件职责以数据边界划分，而不是把所有能力堆叠在一次模型调用里。</p></div>
+        <div class="boundary-map">
+          <article><span class="boundary-label">浏览器</span><h3>审核工作台</h3><p>保存当前页面中的工作区、图片预览和审核结果。</p><small>刷新或关闭后清空</small></article>
+          <div class="boundary-arrow" aria-hidden="true"><span>图片</span>→</div>
+          <article class="boundary-core"><span class="boundary-label">审核后端</span><h3>视觉分析与智能体</h3><p>FG-CLIP2 提取证据，Agent 组织工具调用，轻量 RAG 检索规则。</p><small>统一生成建议与编号</small></article>
+          <div class="boundary-arrow" aria-hidden="true"><span>按需</span>→</div>
+          <article><span class="boundary-label">外部能力</span><h3>OCR 与大语言模型</h3><p>GLM-OCR 在需要时处理图片；DeepSeek 仅接收整理后的文本证据。</p><small>不保存前端工作区结构</small></article>
+        </div>
+      </section>
+
+      <section id="usage" class="landing-section usage-section" aria-labelledby="usageTitle">
+        <div class="section-intro"><span>HOW TO USE</span><h2 id="usageTitle">从图片到建议，只需一次提交</h2></div>
+        <div class="usage-line" aria-label="使用步骤"><strong>选择工作区</strong><span>→</span><strong>拖入或粘贴图片</strong><span>→</span><strong>查看建议并继续审核</strong></div>
+        <p class="usage-meta">支持 JPG、PNG、WEBP · 单张不超过 10MB · 每张图片独立审核 · 页面记录刷新后清空</p>
+      </section>
+
+      <aside class="limitations" aria-label="系统边界说明"><strong>系统边界</strong><p>当前规则库规模较小，采用轻量检索实现。系统不自动判定最终风险等级，审核建议需要结合业务规则进行人工复核。</p></aside>
+
+      <section class="landing-final" aria-labelledby="finalTitle"><span>IMAGEGUARD WORKSPACE</span><h2 id="finalTitle"><span>开始一次清晰、可追溯的</span><span>图片审核</span></h2><a href="#workspace">进入图片审核工作台</a></section>
+    </main>
+    <footer class="landing-footer"><span>ImageGuard · 多模态图片内容审核</span><span>辅助审核 · 人工复核 · 结果可追溯</span></footer>
+  </div>
+
+  <div id="workspaceApp" class="app-layout" hidden inert>
+    <aside id="sidebar" class="sidebar" aria-label="工作区导航">
+      <div class="brand-row"><a class="brand" href="#home" aria-label="返回 ImageGuard 项目介绍"><span class="brand-mark" aria-hidden="true">IG</span><span><strong>ImageGuard</strong><small>图片内容辅助审核</small></span></a><button id="closeSidebar" class="icon-button mobile-only" aria-label="收起侧栏">×</button></div>
+      <button id="newWorkspace" class="new-workspace" type="button" title="创建新的图片审核分组；已有工作区会保留在左侧"><span aria-hidden="true">＋</span> 新建工作区</button>
+      <div class="history-heading"><h2 title="可切换的图片审核分组，每组有自己的图片和结果">工作区</h2><span id="groupCount">1</span></div>
+      <nav id="groupList" class="group-list" aria-label="工作区列表"></nav>
+      <div id="groupMenu" class="group-menu" role="menu" aria-label="工作区操作" hidden><button id="menuRename" type="button" role="menuitem">重命名</button><button id="menuDelete" type="button" role="menuitem">删除工作区</button></div>
+      <div class="history-heading"><h2 title="当前选中工作区内已提交的图片及审核结果">当前工作区的审核记录</h2><span id="historyCount" title="当前工作区已提交的图片张数">0</span></div>
+      <nav id="historyList" class="history-list" aria-label="审核记录"></nav>
+      <p id="historyEmpty" class="history-empty">提交的图片会出现在这里。</p>
+      <div class="sidebar-footer"><button id="clearHistory" class="text-button" type="button" disabled title="只清空当前工作区的图片和结果；其他工作区保留">清空当前工作区记录</button><p>所有工作区仅在本页面保留，刷新或关闭后清空。</p></div>
+    </aside>
+    <button id="sidebarBackdrop" class="sidebar-backdrop" aria-label="收起侧栏" hidden></button>
+    <main class="workspace">
+      <div id="dropOverlay" class="drop-overlay" aria-hidden="true" hidden><div><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><strong>松开以上传图片</strong><span>支持 JPG、PNG、WEBP</span></div></div>
+      <header class="workspace-header">
+        <button id="openSidebar" class="sidebar-toggle" type="button" aria-label="收起工作区导航" aria-controls="sidebar" aria-expanded="true" title="收起工作区导航">☰</button>
+        <div><h1 id="workspaceTitle">工作区 1</h1><p>每张图片独立分析</p></div>
+        <div class="workspace-header-actions">
+          <div class="theme-control">
+            <button id="themeButton" class="theme-button" type="button" aria-label="选择页面外观，当前为跟随系统" aria-controls="themeMenu" aria-expanded="false"><span id="themeIcon" aria-hidden="true"></span><span id="themeLabel" class="sr-only">跟随系统</span></button>
+            <div id="themeMenu" class="theme-menu" role="menu" aria-label="页面外观" hidden>
+              <button class="theme-option" type="button" role="menuitemradio" data-theme-value="system" aria-checked="true"><span class="theme-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><span>跟随系统</span></button>
+              <button class="theme-option" type="button" role="menuitemradio" data-theme-value="light" aria-checked="false"><span class="theme-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span><span>日间</span></button>
+              <button class="theme-option" type="button" role="menuitemradio" data-theme-value="dark" aria-checked="false"><span class="theme-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"/></svg></span><span>夜间</span></button>
+            </div>
+          </div>
+          <button id="helpButton" class="header-icon-button" type="button" aria-label="查看工作台使用说明" aria-haspopup="dialog" aria-controls="helpDialog" title="使用说明"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.3 2.2c-.8.4-1.1.9-1.1 1.8v.3M12 17h.01"/></svg></button>
+        </div>
+      </header>
+      <div id="modeBanner" class="mode-banner" hidden><span id="modeText"></span><button id="copyAddress" class="text-button" hidden>复制访问地址</button></div>
+      <section id="timelineViewport" class="timeline-viewport" aria-label="连续审核工作区" tabindex="0">
+        <div id="welcome" class="welcome"><div class="welcome-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="7" y="9" width="34" height="30" rx="3"/><circle cx="17" cy="19" r="3"/><path d="m8 33 10-9 8 8 6-6 9 9"/></svg></div><span class="eyebrow">IMAGE REVIEW WORKSPACE</span><h2>从一张图片开始</h2><p>上传图片，获取内容审核建议。<br>后续图片可继续提交，并在当前工作区逐条查看。</p><button id="welcomeUpload" class="primary-button">上传图片</button><p class="welcome-note">JPG、PNG、WEBP · 单张不超过 10MB</p><div class="welcome-flow" aria-label="审核流程"><span>01 上传图片</span><i aria-hidden="true"></i><span>02 获取建议</span><i aria-hidden="true"></i><span>03 继续审核</span></div></div>
+        <div id="timeline" class="timeline"></div>
+      </section>
+      <footer class="composer-container">
+        <div id="dropZone" class="composer" aria-label="图片提交区"><div id="pendingFile" class="pending-file" hidden><img id="pendingPreview" alt="待提交图片预览"><div><strong id="pendingName"></strong><span id="pendingMeta"></span></div><button id="removeFile" class="icon-button" aria-label="移除待提交图片">×</button></div><div class="composer-row"><input id="fileInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp"><button id="chooseButton" class="choose-button" type="button"><span aria-hidden="true">＋</span> 选择图片</button><span id="composerHint">或拖拽图片到这里</span><button id="submitButton" class="primary-button" disabled>开始审核 ↑</button></div></div>
+        <p id="localError" class="local-error" role="alert" hidden></p>
+        <div class="composer-footer"><div id="serviceStatus" class="service-status" role="status" title="显示后端连接状态；模拟模式的结果不代表真实模型效果"><span class="status-dot" aria-hidden="true"></span><span id="serviceText">正在连接服务</span><button id="healthRetry" class="text-button" hidden>重试</button></div><p class="composer-note">支持拖入或粘贴图片 · 审核建议仅供参考</p></div>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="renameDialog" class="rename-dialog" aria-labelledby="renameTitle" aria-describedby="renameHelp"><form id="renameForm"><div class="dialog-heading"><div><span class="dialog-eyebrow">工作区设置</span><h2 id="renameTitle">重命名工作区</h2><p id="renameHelp">使用简短、易于识别的名称。</p></div><button id="closeRename" type="button" class="dialog-close" aria-label="关闭重命名窗口">×</button></div><label class="sr-only" for="workspaceName">工作区名称</label><input id="workspaceName" name="workspaceName" type="text" maxlength="32" autocomplete="off" required><div class="dialog-actions"><button id="cancelRename" class="dialog-cancel" type="button">取消</button><button class="dialog-save" type="submit">保存名称</button></div></form></dialog>
+  <dialog id="deleteDialog" class="confirm-dialog" aria-labelledby="deleteTitle" aria-describedby="deleteQuestion"><form id="deleteForm"><div class="dialog-heading"><div><span class="dialog-eyebrow is-danger">不可撤销</span><h2 id="deleteTitle">删除工作区</h2><p id="deleteQuestion"></p></div><button id="closeDelete" type="button" class="dialog-close" aria-label="关闭删除窗口">×</button></div><div class="dialog-actions"><button id="cancelDelete" class="dialog-cancel" type="button">取消</button><button id="confirmDelete" class="dialog-danger" type="submit">删除工作区</button></div></form></dialog>
+  <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpTitle" aria-describedby="helpSummary"><div class="help-dialog-inner"><div class="dialog-heading"><div><span class="dialog-eyebrow">使用说明</span><h2 id="helpTitle">图片审核工作台</h2></div><button id="closeHelp" type="button" class="dialog-close" aria-label="关闭使用说明">×</button></div><p id="helpSummary" class="help-summary">每张图片独立分析，不携带上一张图片的上下文。你可以连续提交图片，并在左侧工作区查看已有结果。</p><dl class="help-details"><div><dt>视觉分析</dt><dd>FG-CLIP2 分析图片内容，审核智能体按需调用文字识别与规则检索。</dd></div><div><dt>数据流向</dt><dd>图片提交至审核后端；DeepSeek 仅接收整理后的文本证据。</dd></div><div><dt>人工复核</dt><dd>系统输出仅作为辅助建议，最终判断仍需由运营人员确认。</dd></div></dl><div class="dialog-actions"><button id="dismissHelp" class="dialog-cancel" type="button">关闭</button><a id="helpLearnMore" class="dialog-primary" href="#home">查看项目详细介绍</a></div></div></dialog>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

@@ -25,6 +25,8 @@ def load_config(path="backend/config.yaml"):
         cfg = yaml.safe_load(f)
     if os.getenv("BACKEND_PORT"):
         cfg.setdefault("server", {})["port"] = int(os.environ["BACKEND_PORT"])
+    if os.getenv("BACKEND_MODE"):
+        cfg.setdefault("runtime", {})["mode"] = os.environ["BACKEND_MODE"]
     return cfg
 
 
@@ -33,6 +35,7 @@ def main():
     cfg = load_config()
     mode = cfg.get("runtime", {}).get("mode", "real")
     vision_client = None
+    features = cfg.get("features", {})
     from backend.service import ReviewService
     from backend.api import init_service
 
@@ -64,10 +67,12 @@ def main():
         )
         if cfg["model"].get("require_checkpoint", True) and not engine.trained:
             raise RuntimeError("真实模式需要已训练的 checkpoint（LoRA adapter + head.pt）")
-        ocr_config_path = cfg.get("ocr_config_path", "config/ocr.yaml")
-        if not os.path.isabs(ocr_config_path):
-            ocr_config_path = os.path.join(_REPO_ROOT, ocr_config_path)
-        ocr_client = OCRClient.from_config(ocr_config_path)
+        ocr_client = None
+        if features.get("ocr_enabled", True):
+            ocr_config_path = cfg.get("ocr_config_path", "config/ocr.yaml")
+            if not os.path.isabs(ocr_config_path):
+                ocr_config_path = os.path.join(_REPO_ROOT, ocr_config_path)
+            ocr_client = OCRClient.from_config(ocr_config_path)
         llm_config_path = cfg.get("llm_config_path", "config/llm.yaml")
         if not os.path.isabs(llm_config_path):
             llm_config_path = os.path.join(_REPO_ROOT, llm_config_path)
@@ -79,7 +84,6 @@ def main():
     else:
         raise ValueError(f"不支持的 runtime.mode: {mode}")
 
-    features = cfg.get("features", {})
     service = ReviewService(
         llm_model=llm_model, engine=engine, ocr_client=ocr_client,
         log_dir=os.path.join(_REPO_ROOT, cfg["log_dir"]),

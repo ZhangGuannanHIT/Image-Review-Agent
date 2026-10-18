@@ -4,6 +4,7 @@ import contextlib
 import copy
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,17 @@ from src.train import _quality_pos_weight, load_training_config, main
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@contextlib.contextmanager
+def chdir(path):
+    """临时切换工作目录；contextlib.chdir 需要 Python 3.11+，这里兼容 3.10。"""
+    previous = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 class TinyTrainingModel(torch.nn.Module):
@@ -139,7 +151,7 @@ class TrainingTests(unittest.TestCase):
             }
             for path, content in formal_files.items():
                 path.write_bytes(content)
-            with contextlib.chdir(root), \
+            with chdir(root), \
                     patch("sys.argv", ["src.train", "--smoke-steps", "1"]), \
                     patch("src.train.parse_label_studio", return_value=(samples, {})), \
                     patch("src.train.ReviewModel", TinyTrainingModel), \

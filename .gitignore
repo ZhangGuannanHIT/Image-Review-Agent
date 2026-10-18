@@ -24,6 +24,8 @@ secrets/
 *.key
 
 # 整个本地基础模型目录及任何模型权重
+# 不加斜杠是为了同时忽略"软链接形式的 fg_clip"（git 不把软链接当目录）
+/fg_clip
 /fg_clip/
 /checkpoints/*
 !/checkpoints/best/
@@ -37,6 +39,7 @@ secrets/
 # 标注导出、数据、测试图片与评估产物
 /project-6-at-2026-09-02-17-12-7fa70f12.json
 /data/
+/deliverables/
 /sample_images/
 /eval_results/
 

@@ -69,7 +69,9 @@ def _parse_annotation(annotation: dict) -> dict[str, list[str]]:
         elif "choices" in v:
             leaf = list(v["choices"])
         elif "text" in v:
-            leaf = [str(v["text"])]
+            # Label Studio 的 textarea 存 list[str]（备注/note），标量形式也兼容。
+            raw_text = v["text"]
+            leaf = [str(x) for x in raw_text] if isinstance(raw_text, list) else [str(raw_text)]
         if leaf:
             res[fn].extend(leaf)
     return {k: list(dict.fromkeys(v)) for k, v in res.items()}  # 去序（集合）

@@ -1,114 +1,164 @@
 # 项目交接摘要
 
-## 当前路线
+更新时间：2026-10-23
 
-项目采用 FG-CLIP2 + LLM ReAct Agent。CLIP、OCR、RAG 和低层像素分析都是 Agent Tools：
+## 1. 当前路线
+
+项目采用 `FG-CLIP2 + LoRA + 分类头 + 受控 ReAct Agent`：
 
 - `analyze_image` 必须成功调用，调用守卫拒绝无 CLIP 证据的最终提交；
-- GLM-OCR、低层特征和 RAG 是可选工具；RAG 已接入本地规则与案例检索；
-- LLM 不直接看图；
-- API 只返回 `id` 和 `suggestion`。
+- 四任务头继续输出 risk、violence type、injury 和 quality；
+- 独立 binary injury 头负责校准后的“是否存在血腥”判断；
+- quality fusion 头融合 CLIP embedding 与 15 维低层质量特征；
+- OCR、低层分析、RAG 和场景概念是受控工具；
+- 程序先完成 `allow / limit / review / block`，LLM 最后只生成解释；
+- LLM 不直接接收原图，也不能改变程序处置；
+- API 稳定返回 `{id, suggestion}`。
 
 详细架构见 `architecture.md`，接口见 `api.md`。
 
-## 标签契约
+## 2. 标签与 checkpoint
 
-训练、推理、评估不得偏离当前 Label Studio 四字段：
+训练和推理使用 Label Studio 四任务标签：
 
 - risk：5 类单标签；
 - violence type：4 路多标签；
 - injury：4 类单标签；
-- quality：5 类多标签（multi-hot，可同时命中"严重模糊 + 文字扭曲形变"）。
+- quality：5 类多标签。
 
-`target` 暂不训练。缺失 type/quality 分别使用 `type_valid`/`quality_valid` 掩码；risk/injury 缺失使用 `IGNORE_INDEX`。checkpoint 的 `labels.json` 带 `schema_version: 2` 与 `task_types`，旧单标签 quality 权重会被拒绝加载。
+主 checkpoint 位于 `checkpoints/best/`，包含 LoRA adapter、四任务头和标签定义。
+独立部署头包括：
 
-## 数据现状
+- `checkpoints/best/injury_binary/`：血腥存在性；
+- `checkpoints/best/quality_fusion/`：视觉 embedding + 低层特征融合质量头。
 
-数据集构建入口为 `python -m src.build_dataset`，输出 `data/clean/`（labels.json + images/ + report.md/report.json + removed_samples.jsonl + review_extras.json）。
+真实模式设置 `require_checkpoint=true`，缺少任一必要权重时服务不会 ready。
 
-2026-10-11 导出（3045 条任务，全部有图）：清洗后保留 **2922** 条，删除 123 条 = 确定性矛盾 114 条（L0 却标直接暴力/血腥/暗示威胁 94 条、违规等级却无暴力且无血腥 5 条、违规等级却缺失表现字段 12 条、无暴力+其他类型 3 条）+ 标注全部取消 9 条，通过率 **95.96%**。原始图片目录里 500 张没有任何标签引用的图片已删除，未进入数据集。
+## 3. 数据与冻结探针
 
-`L0_安全` 却严重模糊/文字扭曲（471 条）与 `X_无法判定` 却标「清晰」只进复核清单，不自动改标签。
+- 主训练集：2922 条清洗后的标注图片；
+- `pic/`：90 张冻结硬探针，不参与训练；
+- `solid/`：180 张血腥程度盲测，AI 严重血腥格为空；
+- `D:\quality`：180 张质量退化探针，固定划分为 60 张开发集和 120 张最终盲测。
 
-## 当前训练结果（2026-10-18）
+当前可报告的关键结果：
 
-第一版权重已完成训练：`checkpoints/best/`（LoRA adapter + head.pt + labels.json schema v2 + 验证集指标）。最多 20 epoch，第 4 轮最佳、第 9 轮早停，耗时约 14 分钟。
+- binary injury 在 solid 上灵敏度 99.0%，无血假阳性率 0.0%，AUROC 0.999875；
+- v4 下 solid 有血图没有自动放行，无血图没有自动限流或下架；
+- solid 无血图为 54 张放行、26 张人工复核；
+- quality 最终盲测 macro-F1 0.572；严重模糊 0.817、文字扭曲 0.600、遮挡 0.456；
+- v4 下 quality 安全图 60 张全部未自动限流/下架；
+- v4 下 quality 违规图仅 3 张放行、18 张复核、38 张限流、1 张下架；
+- v4 的人工复核量高于 v3，这是从“不确定放行”切换为“不确定复核”的直接结果；
+- OCR 小样本证明文字扭曲可以用 OCR/RAG 补充证据，但样本量不足以报告正式泛化指标。
 
-测试集（147 条）：risk macro-F1 0.6215 / L3 recall 0.8571；type micro-F1 0.8224 / macro-F1 0.7757；injury accuracy 0.8116 / macro-F1 0.4614；quality micro-F1 0.5796 / macro-F1 0.4556（文字扭曲 recall 0.929）。多标签阈值已在验证集标定并写入 `config/inference.yaml`。
+详细报告：
 
-主要短板：故意遮挡全量仅 23 条（验证/测试各 3 条），基本不可用；文字扭曲精确率低（0.181），但按项目目标选择了召回优先。数据翻倍后需重新标定阈值。详见 `docs/TRAINING_REPORT_2026-10-18.md`。
+- `docs/HARD_PROBE_2026-10-21.md`
+- `docs/SOLID_BLIND_2026-10-21.md`
+- `docs/QUALITY_PROBE_2026-10-22.md`
+- `docs/OCR_TEXT_DISTORTION_PILOT_2026-10-22.md`
+- `docs/SCENE_CONCEPT_EXPERIMENT_2026-10-23.md`
+- `docs/POLICY_V4_REGRESSION_2026-10-23.md`
 
-## 已完成
+## 4. 当前处置策略
 
-- 修复 ReviewEngine 的 `lora` 作用域错误；
-- 修复 `WeightedCE/focal_gamma` 和 `nn.Module.type` 命名冲突；
-- 接通 FG-CLIP2 processor、视觉塔和四任务头推理；
-- 统一 head 与视觉塔的 device/dtype；
-- 接通多标签缺失掩码；
-- 实现 LoRA adapter + head 的最小 checkpoint；
-- 实现受控 ReAct 图、CLIP 调用守卫和请求缓存；
-- 实现 Mock Engine/LLM/OCR；
-- 固定并完成智谱 GLM-OCR 的 JSON+Base64 接口适配；
-- 固定并完成 DeepSeek-V4-Flash 独立配置与 LangChain 适配；
-- 增加工具级 RAG 禁用开关；
-- 建立项目内 Python 3.12 + CUDA 12.8 环境并验证 RTX 5060 Ti；
-- 使用 `knife_man.jpg` 完成 FG-CLIP2 原始权重真实前向；
-- 使用 DeepSeek-V4-Flash 完成真实 Agent 全流程，轨迹为 `analyze_image → analyze_lowlevel → finalize_review`；
-- 修正 GLM-OCR Base64 data URI 并完成真实接口测试；
-- 实现数据配对、标签头收敛与确定性清洗（`src/build_dataset.py`），并接入 `data/clean/`；
-- 让 `config/inference.yaml` 真正被 `src/cli.py` 读取，补齐 quality 多标签阈值；
-- 自动化测试 48 项（含 9 项不依赖 torch 的数据与配置测试）；
-- 冻结前端接口仍为正常/降级 `{id, suggestion}`、HTTP 错误 `{code, message, id}`；
-- 更新 `.gitignore`，排除整个模型目录、权重、标注导出、数据、密钥和运行产物；
-- 修复 API 图片校验和错误结构；
-- 增加最小训练、评估入口与自动化测试；
-- 更新 README、架构与 API 文档。
+策略版本：`2026-10-23-v4`。
 
-## 外部条件与后续工作
+- 高置信、无冲突的 L0 可以放行；
+- 风险 `X_无法判定`、分数缺失、风险与内容头冲突、证据不足、
+  四分类血腥与 binary injury 冲突时进入人工复核；
+- 风险头支持轻中度违规，并有独立类型、血腥或 OCR 高风险证据时限流；
+- 风险头支持严重违规，并有严重血腥或攻击进行中证据时下架；
+- 用户确认的业务口径是“高分不确定性进入人工复核”，不再采用不确定放行；
+- 质量退化只作为可靠性警告，不单独改变动作。
 
-1. 完成全部标注并导出最终 JSON；
-2. 提供完整本地图片目录；
-3. 在训练机上准备环境（当前 WSL Ubuntu 的 conda 环境 `fgclip`：`/home/ygx/miniconda3/envs/fgclip`，Python 3.10.21 + torch 2.5.1+cu124，RTX 4060 Laptop 8GB，CUDA 可用；只缺 `peft`）；
-4. 运行最终数据体检，复核语义张力记录；
-5. 生成并冻结 `data/split.json`；
-6. 正式训练 LoRA 和四任务头；
-7. 在验证集标定 violence type 阈值；
-8. 在独立测试集生成正式指标；
-9. 为前端联调补充跨域代理或明确部署为同源；
-10. 为 RAG 补充未参与调参的独立查询，持续维护规则与案例；
-11. 正式上线前增加请求级总超时和明确的 504 语义。
+此前针对 binary injury、quality fusion、OCR、场景概念和 L0 条件短路的工作，
+目标是保持违规召回的同时减少无血图误杀和不必要人工复核。solid 上效果明确；
+quality 集仍是下一阶段回归验证和限制说明的重点。
 
-## 运行
+## 5. OCR、RAG 与场景概念
 
-WSL 训练/联调环境（Windows 侧代码位于 `D:\Image-Review-Agent`，WSL 内为 `/mnt/d/Image-Review-Agent`）：
+OCR 当前使用阿里云高精版接口：
+
+- 配置：`config/ocr.yaml`；
+- 鉴权：`Authorization: APPCODE <AppCode>`；
+- 只有 quality 命中文字扭曲、低层检测疑似文字或文字探测失败时才自动 OCR；
+- OCR 结构化状态为 `empty / partial / readable / failed`；
+- 日志不保存 OCR 原文。
+
+本地 RAG 使用字符 n-gram TF-IDF，包含规则、核验案例和教学案例。
+Agent 的通用 `search_knowledge` 结果会去重后写入 `decision_evidence`。
+
+场景概念是独立旁路：
+
+- 非 L0 时由 `analyze_image` 自动执行一次；
+- 常规场景只补充解释；
+- 新闻、医学等安全语境必须有场景 Prompt 与 OCR/RAG 第二证据共同确认；
+- 确认后视觉违规最多降为限流，绝不直接放行；
+- 新闻语境与未加工严重血腥暴力冲突时进入人工复核。
+
+## 6. 完整证据与最终解释
+
+`build_decision_evidence()` 汇总：
+
+- risk / type / injury / quality；
+- binary injury；
+- 低层特征和文字探测状态；
+- OCR 状态与规则命中；
+- 场景概念结果；
+- Agent 通用 RAG 命中。
+
+程序 `decide()` 锁定动作后，独立解释 LLM 接收完整 `decision_evidence` 和只读
+`program_decision`。解释不得携带工具调用或自行输出动作词；校验失败时回退到
+`render(decision)`。日志通过 `final_explanation.status` 和 `suggestion_source`
+区分 LLM 解释与确定性回退。
+
+## 7. 当前测试状态
+
+最近一次全量单元和契约测试：138 项。
+
+已覆盖：
+
+- 策略动作与不再“不确定放行”；
+- binary injury 与原 injury 的冲突处理；
+- quality fusion 与阈值；
+- OCR、RAG、场景概念和低层证据；
+- L0 条件短路及文字探测失败降级；
+- 完整证据包；
+- LLM 最终解释的动作锁和回退；
+- API 契约、图片校验与日志脱敏。
+
+单元测试不能替代业务回归。提交 GitHub 前仍需运行 solid、quality、OCR 小样本
+和真实后端端到端验证。
+
+## 8. 运行
+
+WSL 训练/联调环境：
 
 ```bash
 wsl -d Ubuntu
+source /home/ygx/miniconda3/etc/profile.d/conda.sh
 conda activate fgclip
 cd /mnt/d/Image-Review-Agent
-python -B -m unittest discover -s tests -v      # 全量测试
-python -m src.train --smoke-steps 1             # 冒烟训练
+python -B -m unittest discover -s tests
 ```
 
-后端联调额外需要 `config/llm.yaml`、`config/ocr.yaml` 与 API Key：
+真实后端需要本地 `config/llm.yaml` 和 `config/ocr.yaml`：
 
 ```bash
 export LLM_API_KEY="你的 DeepSeek API Key"
-export OCR_API_KEY="你的智谱 API Key"
+export ALIYUN_OCR_APPCODE="你的阿里云 AppCode"
 python run_backend.py
 ```
 
-真实模式已配置为 `lora=true`、`require_checkpoint=true`，需加载 `checkpoints/best/` 中的 LoRA 和分类头。流程演示可设置 `BACKEND_MODE=mock`，不需要使用随机任务头代替训练后的模型。
+流程演示可设置 `BACKEND_MODE=mock`。Mock 只用于界面和契约联调，不产生正式指标。
 
-## API 联调口径
+## 9. GitHub 与安全口径
 
-- 正常和业务降级均返回 HTTP 200 `{id, suggestion}`；当前没有 `degraded` 字段；
-- 图片/字段错误返回 HTTP 400 `{code, message, id}`；服务未初始化返回 503；
-- 当前没有请求级总超时和 504，前端超时暂建议 120 秒；
-- `/health.mock=false` 仅代表真实视觉引擎，不代表分类头已经训练；
-- RAG 默认注册，取得 CLIP 证据后可按需检索；最终处置仍遵循程序规则；
-- 完整细节以 `docs/api.md` 为准。
-
-## Git 协作口径
-
-仓库只提交代码、测试、文档和无密钥配置模板。`fg_clip/`、checkpoint、数据、阶段性标注 JSON、测试图片、真实密钥配置、虚拟环境和日志全部忽略。任何真实密钥一旦进入 Git 历史必须立即轮换，不能只靠后续删除文件解决。
+- 真实密钥、图片、基础模型、大部分实验产物和运行日志均已忽略；
+- `config/llm.yaml`、`config/ocr.yaml` 只保留本地，不提交；
+- 仓库只提交代码、测试、文档、无密钥配置模板和明确放行的小型部署 checkpoint；
+- 一旦密钥曾进入 Git 历史，必须轮换密钥，不能只删除当前文件；
+- 曾暴露过的阿里云 AppSecret 建议在正式提交前轮换；
+- 请求级总超时和明确 504 语义仍未实现，属于正式上线前工作。

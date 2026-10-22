@@ -1,0 +1,156 @@
+[
+  {
+    "key": "weapon_threat",
+    "title": "武器指向或明确威胁",
+    "kind": "risk",
+    "prompts": [
+      "一个人拿枪或刀指向另一个人，形成明确威胁",
+      "a person pointing a gun or knife at another person"
+    ],
+    "rag_query": "武器指向 持刀威胁 枪口指向 人身威胁",
+    "rag_ids": ["R006", "R008", "R009", "R011"]
+  },
+  {
+    "key": "direct_attack",
+    "title": "直接攻击或肢体暴力",
+    "kind": "risk",
+    "prompts": [
+      "两个人正在打架，出现拳击、踢踹或掐脖等直接攻击动作",
+      "a real fight with punching, kicking, choking, or direct physical assault"
+    ],
+    "rag_query": "直接暴力 攻击动作 打架 斗殴 肢体袭击",
+    "rag_ids": ["R004", "R008", "R009", "R011"]
+  },
+  {
+    "key": "gore_injury",
+    "title": "开放性伤口、血迹或严重伤情",
+    "kind": "risk",
+    "prompts": [
+      "清晰可见的开放性伤口、血迹、血泊或严重身体损伤",
+      "visible open wound, blood, blood pool, corpse, or severe physical injury"
+    ],
+    "rag_query": "开放性伤口 血迹 血泊 严重伤情 尸体现血迹",
+    "rag_ids": ["R005", "R009", "R011"]
+  },
+  {
+    "key": "violence_text",
+    "title": "威胁或暴力文字",
+    "kind": "risk",
+    "prompts": [
+      "画面中的文字明确威胁、教唆伤害或宣扬暴力",
+      "an image with text that threatens, incites harm, or promotes violence"
+    ],
+    "rag_query": "威胁文字 教唆伤害 暴力口号 武器指向配文",
+    "rag_ids": ["R001", "R004", "R006", "R008", "R013"]
+  },
+  {
+    "key": "animal_abuse",
+    "title": "虐待或伤害动物",
+    "kind": "risk",
+    "prompts": [
+      "画面显示对动物的直接虐待、伤害或以取乐为目的的折磨",
+      "an image showing direct abuse, torture, or intentional harm to an animal"
+    ],
+    "rag_query": "虐待动物 虐猫 虐狗 动物受伤",
+    "rag_ids": ["R015", "R011"]
+  },
+  {
+    "key": "medical_context",
+    "title": "医学、手术或临床语境",
+    "kind": "safe_context",
+    "prompts": [
+      "医院或医学教育中的手术、治疗、缝合和专业临床记录",
+      "a medical, surgical, clinical, or first-aid educational context"
+    ],
+    "rag_query": "医学手术 临床教学 急救 法医鉴定 专业医疗语境",
+    "rag_ids": ["R009", "R011", "R014"]
+  },
+  {
+    "key": "news_legal_context",
+    "title": "新闻、警方、法院或普法语境",
+    "kind": "safe_context",
+    "prompts": [
+      "警方通报、法院判决、新闻报道或反暴力普法宣传",
+      "news reporting, police statement, court report, law education, or legal context"
+    ],
+    "rag_query": "警方通报 法院判决 新闻报道 普法宣传 反暴力公益",
+    "rag_ids": ["R009", "R010", "R013"]
+  },
+  {
+    "key": "fiction_context",
+    "title": "影视、动漫或游戏虚构语境",
+    "kind": "safe_context",
+    "prompts": [
+      "电影、电视剧、游戏或动漫中的虚构战斗与剧情场景",
+      "a fictional film, game, or anime scene with staged combat and context"
+    ],
+    "rag_query": "电影 游戏 动漫 虚构剧情 影视名称",
+    "rag_ids": ["R011"]
+  },
+  {
+    "key": "anti_violence",
+    "title": "反暴力或公益宣传",
+    "kind": "safe_context",
+    "prompts": [
+      "反对暴力、拒绝伤害或保护受害者的公益宣传",
+      "an anti-violence, public safety, or victim protection campaign"
+    ],
+    "rag_query": "反对暴力 拒绝伤害 反校园欺凌 公益宣传 珍惜生命",
+    "rag_ids": ["R010", "R013"]
+  },
+  {
+    "key": "red_paint_liquid",
+    "title": "红色颜料、液体或抽象纹理",
+    "kind": "confounder",
+    "prompts": [
+      "红色颜料、红色液体、气泡、刷痕或抽象红色纹理，没有伤口",
+      "red paint, red liquid, bubbles, abstract red texture, or blood-like art without injury"
+    ],
+    "rag_query": "红色颜料 红色液体 抽象纹理 非血腥红色素材",
+    "rag_ids": ["R005"]
+  },
+  {
+    "key": "red_object_clothing",
+    "title": "红色物体、动物、服装或妆容",
+    "kind": "confounder",
+    "prompts": [
+      "红色衣服、口红、食物、饮料、红色动物或无伤红色物体",
+      "red clothing, makeup, food, drink, animal, or object without any injury"
+    ],
+    "rag_query": "红色衣服 红色妆容 红色食物 红色鹦鹉 红色猫",
+    "rag_ids": []
+  },
+  {
+    "key": "harmless_weapon",
+    "title": "合法展示或非威胁武器",
+    "kind": "confounder",
+    "prompts": [
+      "博物馆、收藏、合法训练或商品展示中的武器，没有指向人或攻击动作",
+      "a weapon displayed in a museum, collection, legal training, or product context without a threat"
+    ],
+    "rag_query": "合法刀具 武器展示 军事历史 收藏 靶场 法律训练",
+    "rag_ids": ["R002", "R008", "R011"]
+  },
+  {
+    "key": "anime_illustration",
+    "title": "二次元插画或动画风格",
+    "kind": "domain",
+    "prompts": [
+      "二次元动漫插画或日系动画风格的画面",
+      "an anime illustration or Japanese animation style image"
+    ],
+    "rag_query": "",
+    "rag_ids": []
+  },
+  {
+    "key": "real_photo",
+    "title": "真实照片或写实影像",
+    "kind": "domain",
+    "prompts": [
+      "真实拍摄的照片或写实影像",
+      "a real photograph or realistic camera image"
+    ],
+    "rag_query": "",
+    "rag_ids": []
+  }
+]

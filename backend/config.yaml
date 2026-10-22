@@ -19,11 +19,18 @@ model:
   device: "cuda"
   lora: true                 # 加载训练后的视觉 LoRA adapter
   require_checkpoint: true   # 必须同时加载 LoRA adapter 与分类头
+  binary_injury_dir: "checkpoints/best/injury_binary"
+  quality_fusion_dir: "checkpoints/best/quality_fusion"
 
 features:
   ocr_enabled: true
   lowlevel_enabled: true
   rag_enabled: true           # 启用本地规则与案例检索，无额外服务依赖
+  scene_concepts_enabled: true # 仅风险非 L0 时由 Agent 按需调用
+  llm_explanation_enabled: true # 程序裁决后由 LLM 仅生成解释，不改变动作
+
+scene_concepts:
+  config_path: "config/scene_concepts.yaml"
 
 # ReAct agent 配置（LLM 为核心）
 agent:
@@ -40,7 +47,7 @@ audit:
   save_images: true
 
 vision_review:
-  enabled: true
+  enabled: false  # 默认不把原图发送给外部 LLM；仅在显式审计模式开启
   trigger:
     max_confidence: 0.65
     min_margin: 0.20

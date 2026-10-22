@@ -31,6 +31,7 @@ class ModelOutput:
     quality: dict[str, Any]
     conf: float
     trained: bool = False
+    blood_binary: Optional[dict[str, Any]] = None
 
     @property
     def risk_label(self) -> str:
@@ -111,6 +112,8 @@ class ReviewEngine:
         type_thresholds: Optional[dict[str, float]] = None,
         strict_load: bool = False,
         quality_thresholds: Optional[dict[str, float]] = None,
+        binary_injury_dir: str = "",
+        quality_fusion_dir: str = "",
     ):
         self.model_path = str(model_path)
         self.ckpt_dir = str(ckpt_dir or "")
@@ -124,8 +127,15 @@ class ReviewEngine:
         if any(not 0 <= value <= 1 for value in (*self.type_thresholds.values(), *self.quality_thresholds.values())):
             raise ValueError("多标签阈值必须位于 [0, 1]")
         self.strict_load = strict_load
+        self.binary_injury_dir = str(binary_injury_dir or "")
+        self.quality_fusion_dir = str(quality_fusion_dir or "")
         self.model: Optional[ReviewModel] = None
         self.processor = None
+        self.binary_head = None
+        self.binary_threshold = 0.5
+        self.quality_fusion_head = None
+        self.quality_fusion_mean = None
+        self.quality_fusion_std = None
         self.trained = False
         self.head_loaded = False
         self.adapter_loaded = False
@@ -154,6 +164,10 @@ class ReviewEngine:
             )
             if self.ckpt_dir:
                 self._load_checkpoint(self.ckpt_dir)
+            if self.binary_injury_dir:
+                self._load_binary_injury(self.binary_injury_dir)
+            if self.quality_fusion_dir:
+                self._load_quality_fusion(self.quality_fusion_dir)
             self.model.eval()
         except Exception as exc:  # noqa: BLE001
             self.model = None
@@ -189,6 +203,58 @@ class ReviewEngine:
             self.adapter_loaded = True
         self.trained = self.head_loaded and (not self.lora or self.adapter_loaded)
 
+    def _load_binary_injury(self, head_dir: str) -> None:
+        assert self.model is not None
+        from .binary_injury import BinaryInjuryHead
+
+        metadata_path = Path(head_dir) / "metadata.json"
+        weights_path = Path(head_dir) / "head.pt"
+        if not metadata_path.is_file() or not weights_path.is_file():
+            raise ValueError("binary injury checkpoint 缺少 metadata.json 或 head.pt")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        embedding_dim = int(metadata.get("embedding_dim", self.model.embed_dim))
+        if embedding_dim != self.model.embed_dim:
+            raise ValueError(
+                f"binary injury embedding 维度不匹配: {embedding_dim} != {self.model.embed_dim}"
+            )
+        threshold = float(metadata["validation_operating_point"]["threshold"])
+        if not 0 <= threshold <= 1:
+            raise ValueError("binary injury 阈值必须位于 [0, 1]")
+        state = torch.load(weights_path, map_location=self.device, weights_only=True)
+        head = BinaryInjuryHead(embedding_dim)
+        head.load_state_dict(state, strict=True)
+        self.binary_head = head.to(self.device).eval()
+        self.binary_threshold = threshold
+
+    def _load_quality_fusion(self, head_dir: str) -> None:
+        assert self.model is not None
+        from .quality_fusion import QualityFusionHead
+
+        metadata_path = Path(head_dir) / "metadata.json"
+        weights_path = Path(head_dir) / "head.pt"
+        if not metadata_path.is_file() or not weights_path.is_file():
+            raise ValueError("quality fusion checkpoint 缺少 metadata.json 或 head.pt")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        head = QualityFusionHead(
+            int(metadata["embedding_dim"]), int(metadata["feature_dim"])
+        )
+        head.load_state_dict(
+            torch.load(weights_path, map_location=self.device, weights_only=True)
+        )
+        self.quality_fusion_head = head.to(self.device).eval()
+        self.quality_fusion_mean = torch.tensor(
+            metadata["feature_mean"], dtype=torch.float32
+        )
+        self.quality_fusion_std = torch.tensor(
+            metadata["feature_std"], dtype=torch.float32
+        )
+        thresholds = metadata["thresholds"]
+        if set(thresholds) != set(labels.QUALITY_CLASSES):
+            raise ValueError("quality fusion 阈值未覆盖全部 quality 类别")
+        self.quality_thresholds = {
+            label: float(thresholds[label]) for label in labels.QUALITY_CLASSES
+        }
+
     def save_checkpoint(self, output_dir: str, metrics: Optional[dict] = None) -> None:
         if self.model is None:
             raise RuntimeError("模型未加载，无法保存 checkpoint")
@@ -219,6 +285,9 @@ class ReviewEngine:
         if not self.loaded or self.model is None:
             raise RuntimeError(f"模型未加载成功，无法推理。请检查权重与环境。{self._load_error}")
 
+        pil_image = decode_image(image) if getattr(
+            self, "quality_fusion_head", None
+        ) is not None else None
         inputs = self.prepare_image(image)
         required = ("pixel_values", "pixel_attention_mask", "spatial_shapes")
         missing = [name for name in required if name not in inputs]
@@ -233,10 +302,49 @@ class ReviewEngine:
                 spatial_shapes=inputs["spatial_shapes"],
             )
             logits = self.model(image_embeds)
+            blood_binary = None
+            if getattr(self, "binary_head", None) is not None:
+                blood_score = float(
+                    torch.sigmoid(self.binary_head(image_embeds)).item()
+                )
+                blood_binary = {
+                    "p_blood": round(blood_score, 6),
+                    "threshold": self.binary_threshold,
+                    "label": "有血腥" if blood_score >= self.binary_threshold else "无血腥",
+                    "trained": True,
+                }
 
         risk = _single_label(logits["risk"], labels.RISK_CLASSES)
         injury = _single_label(logits["injury"], labels.INJURY_CLASSES)
         quality = _multi_label(logits["quality"], labels.QUALITY_CLASSES, self.quality_thresholds)
+        if getattr(self, "quality_fusion_head", None) is not None:
+            from .quality_features import extract_quality_features
+
+            assert pil_image is not None
+            feature = torch.from_numpy(
+                extract_quality_features(pil_image)
+            ).unsqueeze(0)
+            feature = (
+                feature - self.quality_fusion_mean
+            ) / self.quality_fusion_std
+            with torch.inference_mode():
+                quality_scores = torch.sigmoid(
+                    self.quality_fusion_head(
+                        image_embeds, feature.to(self.device)
+                    )
+                )[0].cpu().tolist()
+            quality = {
+                "labels": [
+                    label for label, score in zip(labels.QUALITY_CLASSES, quality_scores)
+                    if score >= self.quality_thresholds[label]
+                ],
+                "scores": {
+                    label: round(float(score), 6)
+                    for label, score in zip(labels.QUALITY_CLASSES, quality_scores)
+                },
+                "thresholds": dict(self.quality_thresholds),
+                "source": "clip_feature_fusion",
+            }
         type_result = _multi_label(logits["type"], labels.TYPE_CLASSES, self.type_thresholds)
         # quality 是五个独立的二元判断；取最不确定判断的概率作为保守提示。
         quality_confidence = min(
@@ -247,6 +355,7 @@ class ReviewEngine:
         return ModelOutput(
             risk=risk, type=type_result, injury=injury, quality=quality,
             conf=round(float(confidence), 6), trained=self.trained,
+            blood_binary=blood_binary,
         )
 
     def review(self, image: ImageInput, opts: Optional[dict] = None) -> dict[str, Any]:

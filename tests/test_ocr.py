@@ -2,12 +2,14 @@
 
 import base64
 import io
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from backend.ocr import GLMOCRConfig, OCRClient
+from backend.ocr import AliyunOCRConfig, GLMOCRConfig, OCRClient
 
 
 def png_bytes() -> bytes:
@@ -17,10 +19,20 @@ def png_bytes() -> bytes:
 
 
 class GLMOCRTests(unittest.TestCase):
-    def test_config_is_glm_ocr(self):
-        config = GLMOCRConfig.from_yaml("config/ocr.example.yaml")
-        self.assertEqual(config.provider, "glm_ocr")
-        self.assertEqual(config.model, "glm-ocr")
+    def test_example_config_is_aliyun_market_ocr(self):
+        config = AliyunOCRConfig.from_yaml("config/ocr.example.yaml")
+        self.assertEqual(config.provider, "aliyun_market_ocr")
+        self.assertEqual(config.endpoint, "https://gjbsb.market.alicloudapi.com/ocrservice/advanced")
+
+    def test_legacy_glm_config_still_loads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ocr.yaml"
+            path.write_text(
+                "glm_ocr:\n  provider: glm_ocr\n  model: glm-ocr\n  api_key: secret\n",
+                encoding="utf-8",
+            )
+            client = OCRClient.from_config(path)
+            self.assertEqual(client.config.provider, "glm_ocr")
 
     def test_not_configured_is_not_no_text(self):
         result = OCRClient(GLMOCRConfig(api_key="")).recognize(png_bytes())
@@ -64,6 +76,39 @@ class GLMOCRTests(unittest.TestCase):
         result = OCRClient(GLMOCRConfig(api_key="secret")).recognize(png_bytes())
         self.assertEqual(result["texts"], ["只有 Markdown"])
         self.assertEqual(result["boxes"], [])
+
+    @patch("backend.ocr.requests.post")
+    def test_aliyun_appcode_request_and_response(self, post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "sid": "sid-1",
+            "width": 100,
+            "height": 50,
+            "content": "测试文字",
+            "prism_rowsInfo": [{"rowId": 0, "word": "测试文字"}],
+            "prism_wordsInfo": [{
+                "word": "测试文字",
+                "prob": 88,
+                "pos": [
+                    {"x": 10, "y": 5},
+                    {"x": 80, "y": 5},
+                    {"x": 80, "y": 25},
+                    {"x": 10, "y": 25},
+                ],
+            }],
+        }
+        post.return_value = response
+        client = OCRClient(AliyunOCRConfig(appcode="secret"))
+        result = client.recognize(png_bytes())
+        self.assertTrue(result["success"])
+        self.assertEqual(result["texts"], ["测试文字"])
+        self.assertEqual(result["boxes"], [[0.1, 0.1, 0.8, 0.5]])
+        self.assertAlmostEqual(result["mean_confidence"], 0.88)
+        kwargs = post.call_args.kwargs
+        self.assertEqual(kwargs["headers"]["Authorization"], "APPCODE secret")
+        self.assertTrue(kwargs["json"]["prob"])
+        self.assertNotIn("url", kwargs["json"])
 
 
 if __name__ == "__main__":

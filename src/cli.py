@@ -69,6 +69,8 @@ def main():
         lora=args.lora if args.lora is not None else config.get("lora", True),
         type_thresholds=config.get("type_thresholds"),
         quality_thresholds=config.get("quality_thresholds"),
+        binary_injury_dir=_resolve(config.get("binary_injury_dir", "")),
+        quality_fusion_dir=_resolve(config.get("quality_fusion_dir", "")),
         strict_load=config.get("strict_load", False),
     )
 
@@ -83,6 +85,8 @@ def main():
         print(f"risk: {result['risk']['label']}")
         print(f"violence_type: {result['type']['labels']}")
         print(f"injury: {result['injury']['label']}")
+        if result.get("blood_binary"):
+            print(f"blood_binary: {result['blood_binary']['label']} ({result['blood_binary']['p_blood']:.3f})")
         print(f"quality: {result['quality']['labels']}")
         print(f"confidence: {result['conf']:.4f}")
 

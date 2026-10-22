@@ -10,7 +10,9 @@ from langgraph.graph import END, START, StateGraph
 
 from .prompts import SYSTEM_PROMPT
 from .state import ReviewState
-from .tools import get_request_context, knowledge_cache_key, tools_by_name
+from .tools import (
+    get_request_context, knowledge_cache_key, tools_by_name,
+)
 
 
 def build_agent(
@@ -89,6 +91,10 @@ def build_agent(
                                   "cached": cached_before, "ok": review.get("status") == "ok",
                                   "args": {}, "output": review})
                 output_messages.append(ToolMessage(content=content, tool_call_id=call_id, name=name))
+                if name == "analyze_image" and context.cache.get("l0_short_circuit"):
+                    finalized = True
+                    suggestion = "CLIP 风险头判定为 L0_安全，未发现需要继续取证的内容冲突。"
+                    break
                 if finalized:
                     break
             except Exception as exc:  # noqa: BLE001

@@ -92,6 +92,13 @@ class DeepSeekConfigTests(unittest.TestCase):
         self.assertIn("teaching_case", enabled)
         self.assertIn("不要调用 search_knowledge", disabled)
 
+    def test_scene_concept_prompt_is_gated(self):
+        enabled = build_system_prompt(rag_enabled=True, scene_concepts_enabled=True)
+        disabled = build_system_prompt(rag_enabled=True, scene_concepts_enabled=False)
+        self.assertIn("只有 CLIP 风险不是 L0", enabled)
+        self.assertIn("绝不能放行", enabled)
+        self.assertIn("不要调用 match_scene_concepts", disabled)
+
 
 if __name__ == "__main__":
     unittest.main()

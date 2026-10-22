@@ -120,7 +120,7 @@ class VisionTests(unittest.TestCase):
         for verdict, severity, action in [("not_supported", "none", "allow"),
                                            ("supported", "moderate", "limit"),
                                            ("supported", "severe", "block"),
-                                           ("uncertain", "unknown", "allow")]:
+                                           ("uncertain", "unknown", "review")]:
             review = {"status": "ok", "verdict": verdict, "severity": severity,
                       "observation": "复核依据", "trigger": {"eligible": True}}
             result = decide(evidence(2, 2, .52), DecisionPolicy(), review)

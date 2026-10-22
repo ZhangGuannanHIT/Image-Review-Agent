@@ -35,6 +35,8 @@ def main():
     cfg = load_config()
     mode = cfg.get("runtime", {}).get("mode", "real")
     vision_client = None
+    scene_scorer = None
+    scene_options = None
     features = cfg.get("features", {})
     from backend.service import ReviewService
     from backend.api import init_service
@@ -64,6 +66,14 @@ def main():
             strict_load=True,
             type_thresholds=inference_cfg.get("type_thresholds"),
             quality_thresholds=inference_cfg.get("quality_thresholds"),
+            binary_injury_dir=os.path.join(
+                _REPO_ROOT,
+                cfg["model"].get("binary_injury_dir", "checkpoints/best/injury_binary"),
+            ),
+            quality_fusion_dir=os.path.join(
+                _REPO_ROOT,
+                cfg["model"].get("quality_fusion_dir", "checkpoints/best/quality_fusion"),
+            ),
         )
         if cfg["model"].get("require_checkpoint", True) and not engine.trained:
             raise RuntimeError("真实模式需要已训练的 checkpoint（LoRA adapter + head.pt）")
@@ -81,6 +91,22 @@ def main():
         if cfg.get("vision_review", {}).get("enabled", False):
             from backend.vision import DeepSeekBloodReviewer
             vision_client = DeepSeekBloodReviewer(llm_client.config)
+        if features.get("scene_concepts_enabled", False):
+            from backend.scene_concepts import SceneConceptScorer
+            scene_cfg = cfg.get("scene_concepts", {})
+            scene_config_path = scene_cfg.get(
+                "config_path", "config/scene_concepts.yaml"
+            )
+            if not os.path.isabs(scene_config_path):
+                scene_config_path = os.path.join(_REPO_ROOT, scene_config_path)
+            with open(scene_config_path, "r", encoding="utf-8") as file:
+                scene_options = yaml.safe_load(file) or {}
+            prompt_path = scene_options.get(
+                "prompts_path", "knowledge/scene_concepts.json"
+            )
+            if not os.path.isabs(prompt_path):
+                prompt_path = os.path.join(_REPO_ROOT, prompt_path)
+            scene_scorer = SceneConceptScorer(engine, prompt_path)
     else:
         raise ValueError(f"不支持的 runtime.mode: {mode}")
 
@@ -96,6 +122,12 @@ def main():
         decision_policy=cfg.get("decision_policy"),
         vision_client=vision_client,
         vision_gate=cfg.get("vision_review", {}).get("trigger"),
+        scene_scorer=scene_scorer,
+        scene_concepts_enabled=(
+            mode == "real" and features.get("scene_concepts_enabled", False)
+        ),
+        scene_options=scene_options,
+        explanation_enabled=features.get("llm_explanation_enabled", True),
         save_images=cfg.get("audit", {}).get("save_images", True))
 
     init_service(service, max_image_mb=cfg["server"].get("max_image_mb", 10))

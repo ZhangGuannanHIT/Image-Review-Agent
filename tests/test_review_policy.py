@@ -27,7 +27,7 @@ def evidence(risk=0, injury=0, confidence=0.9, active=None):
             "injury": single(INJURY_CLASSES, injury),
             "type": {"labels": active, "thresholds": dict(zip(TYPE_CLASSES, [.45, .6, .6, .9])), "scores": {name: 0.95 if name in active else 0.01
                                                      for name in TYPE_CLASSES}},
-            "quality": {"labels": ["轻微模糊", "文字扭曲形变"]}}
+            "quality": {"labels": ["清晰"]}}
 
 
 class Engine:
@@ -78,23 +78,77 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(_is_conflict([TYPE_CLASSES[0], TYPE_CLASSES[1]]))
         self.assertEqual(decide(evidence(3, 3), DecisionPolicy())["action"], "block")
 
-    def test_uncertain_allow_and_clear_actions(self):
+    def test_binary_blood_head_vetoes_unconfirmed_severity(self):
+        item = evidence(2, 3, .9, [TYPE_CLASSES[2]])
+        item["blood_binary"] = {
+            "p_blood": 0.10,
+            "threshold": 0.285,
+            "label": "无血腥",
+        }
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "review")
+        self.assertFalse(result["blood_binary_candidate"]["supported"])
+        self.assertFalse(result["injury_candidate"]["accepted"])
+        self.assertIn("冲突", result["reason"])
+        self.assertIn("人工复核", render(result))
+
+    def test_binary_blood_head_can_confirm_existing_severity(self):
+        item = evidence(3, 3, .9)
+        item["blood_binary"] = {
+            "p_blood": 0.90,
+            "threshold": 0.285,
+            "label": "有血腥",
+        }
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "block")
+        self.assertTrue(result["blood_binary_candidate"]["supported"])
+        self.assertIn("血腥二分类", render(result))
+
+    def test_uncertain_reviews_and_clear_actions_remain_decisive(self):
         for risk, injury, confidence, action in [
-            (0, 0, .9, "allow"), (2, 2, .52, "allow"), (3, 3, .48, "allow"),
-            (4, 0, .9, "allow"), (1, 1, .9, "limit"), (2, 2, .9, "limit"),
-            (3, 3, .9, "block"), (3, 0, .9, "allow"), (0, 3, .9, "allow"),
+            (0, 0, .9, "allow"), (2, 2, .52, "review"), (3, 3, .48, "review"),
+            (4, 0, .9, "review"), (1, 1, .9, "limit"), (2, 2, .9, "limit"),
+            (3, 3, .9, "block"), (3, 0, .9, "review"), (0, 3, .9, "review"),
         ]:
             with self.subTest(risk=risk, injury=injury, confidence=confidence):
                 result = decide(evidence(risk, injury, confidence), DecisionPolicy())
                 self.assertEqual(result["action"], action)
-                self.assertNotIn("人工", render(result))
+                if action != "review":
+                    self.assertNotIn("人工复核", render(result))
 
-    def test_real_conflict_and_missing_scores_allow(self):
+    def test_quality_degradation_stays_warning_but_uncertainty_reviews(self):
+        item = evidence(2, 0, .5)
+        item["quality"]["labels"] = ["严重模糊"]
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "review")
+        self.assertTrue(result["quality_candidate"]["needs_review"])
+        self.assertEqual(result["quality_candidate"]["action_effect"], "evidence_warning_only")
+        self.assertIn("高不确定性", result["reason"])
+        self.assertIn("严重模糊", render(result))
+
+    def test_clear_quality_does_not_change_normal_allow(self):
+        self.assertEqual(decide(evidence(0, 0, .9), DecisionPolicy())["action"], "allow")
+
+    def test_safe_risk_with_quality_degradation_does_not_force_review(self):
+        item = evidence(0, 0, .9)
+        item["quality"]["labels"] = ["严重模糊"]
+        self.assertEqual(decide(item, DecisionPolicy())["action"], "allow")
+
+    def test_unknown_risk_routes_to_review_without_quality_dependency(self):
+        item = evidence(4, 0, .9)
+        item["quality"]["labels"] = ["清晰"]
+        self.assertEqual(decide(item, DecisionPolicy())["action"], "review")
+
+    def test_conflict_and_missing_scores_review(self):
         item = evidence(3, 3, active=TYPE_CLASSES[:2])
-        self.assertTrue(decide(item, DecisionPolicy())["uncertain"])
+        result = decide(item, DecisionPolicy())
+        self.assertTrue(result["uncertain"])
+        self.assertEqual(result["action"], "review")
         item = evidence(3, 3)
         item["risk"]["scores"] = {}
-        self.assertEqual(decide(item, DecisionPolicy())["action"], "allow")
+        result = decide(item, DecisionPolicy())
+        self.assertTrue(result["uncertain"])
+        self.assertEqual(result["action"], "review")
 
     def test_warm_color_and_dense_edges_do_not_assert_semantics(self):
         features = extract(Image.new("RGB", (64, 64), (205, 145, 125)))

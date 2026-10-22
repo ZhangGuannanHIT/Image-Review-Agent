@@ -20,10 +20,15 @@ from langchain_core.messages import HumanMessage
 
 from . import tools as tools_mod
 from .agent import build_agent
+from .explanation import compose_final_suggestion, generate_final_explanation
 from .parser import extract_suggestion
 from .prompts import build_system_prompt
 from .schemas import ReviewResponse
-from .policy import DecisionPolicy, decide, render
+from .policy import DecisionPolicy, decide
+from . import rag as rag_mod
+from .text_evidence import (
+    assess_text_evidence, build_decision_evidence, collect_knowledge_hits,
+)
 from .vision import VisionGate
 
 
@@ -45,10 +50,15 @@ class ReviewService:
         save_images: bool = True,
         vision_client: Any = None,
         vision_gate: dict | None = None,
+        scene_scorer: Any = None,
+        scene_concepts_enabled: bool = False,
+        scene_options: dict | None = None,
+        explanation_enabled: bool = True,
     ):
         self.llm_model = llm_model
         self.engine = engine
         self.ocr_client = ocr_client
+        self.policy = DecisionPolicy(**(decision_policy or {}))
         self.tools = tools_mod.build_tools(
             engine,
             ocr_client,
@@ -58,11 +68,16 @@ class ReviewService:
             enable_rag=rag_enabled,
             vision_client=vision_client,
             vision_gate=VisionGate(**(vision_gate or {})),
+            scene_scorer=scene_scorer,
+            scene_options=scene_options,
         )
         self.agent = build_agent(
             llm_model,
             self.tools,
-            system_prompt=build_system_prompt(rag_enabled=rag_enabled),
+            system_prompt=build_system_prompt(
+                rag_enabled=rag_enabled,
+                scene_concepts_enabled=scene_concepts_enabled,
+            ),
             max_rounds=max_rounds,
             on_tool_fail=on_tool_fail,
         )
@@ -70,7 +85,8 @@ class ReviewService:
         self.max_rounds = max_rounds
         self.mock_mode = mock_mode
         self.rag_enabled = rag_enabled
-        self.policy = DecisionPolicy(**(decision_policy or {}))
+        self.retriever = retriever or rag_mod.retrieve
+        self.explanation_enabled = explanation_enabled
         self.save_images = save_images
         self.model_identity = {"checkpoint": str(getattr(engine, "ckpt_dir", "")),
                                "trained": bool(getattr(engine, "trained", False)),
@@ -113,6 +129,8 @@ class ReviewService:
                 "provider": ocr.get("provider", ""),
                 "model": ocr.get("model", ""),
                 "text_count": len(ocr.get("texts", []) or []),
+                "mean_confidence": ocr.get("mean_confidence"),
+                "line_confidences": ocr.get("line_confidences", []),
                 "request_id": ocr.get("request_id", ""),
                 "error": ocr.get("error"),
             }
@@ -145,6 +163,14 @@ class ReviewService:
         for field in ("suggestion", "agent_suggestion"):
             if field in record:
                 record[field] = self._redact_text(record[field])
+        final_explanation = record.get("final_explanation")
+        if isinstance(final_explanation, dict):
+            final_explanation = dict(final_explanation)
+            if isinstance(final_explanation.get("explanation"), str):
+                final_explanation["explanation"] = self._redact_text(
+                    final_explanation["explanation"]
+                )
+            record["final_explanation"] = final_explanation
         if "tool_results" in record:
             record["tool_results"] = self._sanitize_tool_results(record["tool_results"])
         # Raw messages and tool arguments can repeat OCR text and search queries.
@@ -157,6 +183,79 @@ class ReviewService:
         path = os.path.join(self.log_dir, "review.log.jsonl")
         with open(path, "a", encoding="utf-8") as file:
             file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def _finalize_policy_decision(
+        self,
+        context: tools_mod.RequestToolContext,
+        log: dict[str, Any],
+    ) -> str | None:
+        """完成结构化证据包、程序裁决和最终 LLM 解释。"""
+        if "analyze_image" not in context.cache:
+            return None
+        evidence = dict(context.cache["analyze_image"])
+        lowlevel = context.cache.get("analyze_lowlevel")
+        if isinstance(lowlevel, dict):
+            evidence["lowlevel"] = {
+                "status": "ok",
+                "source": context.cache.get(
+                    "analyze_lowlevel_source", "agent_tool"
+                ),
+                "features": lowlevel,
+                "text_probe_ok": bool(
+                    context.cache.get("text_probe_ok", True)
+                ),
+                "text_suspected": bool(
+                    context.cache.get("text_suspected", False)
+                ),
+            }
+        else:
+            evidence["lowlevel"] = {
+                "status": "failed" if context.cache.get("text_probe_error")
+                else "not_called",
+                "source": "automatic_text_probe",
+                "error": context.cache.get("text_probe_error"),
+                "text_probe_ok": bool(
+                    context.cache.get("text_probe_ok", False)
+                ),
+                "text_suspected": bool(
+                    context.cache.get("text_suspected", False)
+                ),
+            }
+        text_assessment = assess_text_evidence(
+            context.cache.get("ocr_image"),
+            self.retriever if self.rag_enabled else None,
+        )
+        evidence["text_evidence"] = text_assessment
+        knowledge_hits = collect_knowledge_hits(context.cache)
+        evidence["search_knowledge"] = knowledge_hits
+        if "match_scene_concepts" in context.cache:
+            evidence["scene_concepts"] = context.cache["match_scene_concepts"]
+            log["scene_concepts"] = context.cache["match_scene_concepts"]
+
+        decision_evidence = build_decision_evidence(evidence)
+        decision = decide(evidence, self.policy, context.cache.get("review_blood"))
+        if self.explanation_enabled:
+            explanation_result = generate_final_explanation(
+                self.llm_model, decision_evidence, decision
+            )
+        else:
+            explanation_result = {
+                "status": "disabled",
+                "reason": "feature_disabled",
+            }
+        suggestion = compose_final_suggestion(decision, explanation_result)
+
+        log["decision_evidence"] = decision_evidence
+        log["decision"] = decision
+        log["text_evidence"] = text_assessment
+        log["search_knowledge_hits"] = knowledge_hits
+        log["final_explanation"] = explanation_result
+        log["suggestion_source"] = (
+            "llm_explanation"
+            if explanation_result.get("status") == "ok"
+            else "deterministic_fallback"
+        )
+        return suggestion
 
     def review(self, image_bytes: bytes, filename: str = "") -> ReviewResponse:
         started = time.monotonic()
@@ -202,10 +301,10 @@ class ReviewService:
             suggestion = extract_suggestion(result)
             context = tools_mod.get_request_context()
             log["agent_suggestion"] = suggestion
-            if result.get("clip_succeeded") and "analyze_image" in context.cache:
-                decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
-                suggestion = render(decision)
-                log["decision"] = decision
+            if result.get("clip_succeeded"):
+                policy_suggestion = self._finalize_policy_decision(context, log)
+                if policy_suggestion:
+                    suggestion = policy_suggestion
             log["evidence_text"] = context.cache.get("analyze_image_text", "")
             log["messages"] = [
                 {"type": message.type, "name": getattr(message, "name", None),
@@ -229,10 +328,9 @@ class ReviewService:
         except Exception as exc:  # noqa: BLE001
             suggestion = "审核流程暂不可用，无法完成本次审核，请稍后重试。"
             context = tools_mod.get_request_context()
-            if "analyze_image" in context.cache:
-                decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
-                suggestion = render(decision)
-                log["decision"] = decision
+            policy_suggestion = self._finalize_policy_decision(context, log)
+            if policy_suggestion:
+                suggestion = policy_suggestion
             log.update({
                 "error": f"{type(exc).__name__}: {exc}",
                 "degraded": True,

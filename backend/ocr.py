@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""智谱 GLM-OCR 适配器。
+"""OCR provider adapters.
 
-只负责字符与版面提取，不要求模型描述图片语义。官方接口：
-POST /api/paas/v4/layout_parsing，JSON 字段 file 支持 URL 或 Base64。
+Supports Aliyun Marketplace AppCode OCR and the legacy GLM-OCR endpoint.
+The provider only extracts characters and layout; it does not classify content.
 """
 
 from __future__ import annotations
@@ -40,7 +40,43 @@ class GLMOCRConfig:
         return cls(**{**configured.__dict__, "api_key": api_key})
 
 
-def _failure(config: GLMOCRConfig, error: str, available: bool = True) -> dict[str, Any]:
+@dataclass(frozen=True)
+class AliyunOCRConfig:
+    provider: str = "aliyun_market_ocr"
+    model: str = "advanced"
+    endpoint: str = "https://gjbsb.market.alicloudapi.com/ocrservice/advanced"
+    appcode: str = ""
+    timeout: int = 60
+    max_image_mb: int = 25
+    prob: bool = True
+    char_info: bool = False
+    rotate: bool = True
+    table: bool = False
+    sort_page: bool = False
+    no_stamp: bool = False
+    figure: bool = False
+    row: bool = True
+    paragraph: bool = False
+    oricoord: bool = True
+
+    @classmethod
+    def from_yaml(cls, path: str) -> "AliyunOCRConfig":
+        with open(path, "r", encoding="utf-8") as file:
+            raw = yaml.safe_load(file) or {}
+        section = raw.get("aliyun_market_ocr", raw)
+        aliases = {
+            "charInfo": "char_info",
+            "sortPage": "sort_page",
+            "noStamp": "no_stamp",
+            "oricoord": "oricoord",
+        }
+        normalized = {aliases.get(key, key): value for key, value in section.items()}
+        configured = cls(**normalized)
+        appcode = os.getenv("ALIYUN_OCR_APPCODE") or configured.appcode
+        return cls(**{**configured.__dict__, "appcode": appcode})
+
+
+def _failure(config: Any, error: str, available: bool = True) -> dict[str, Any]:
     return {
         "success": False,
         "available": available,
@@ -50,6 +86,8 @@ def _failure(config: GLMOCRConfig, error: str, available: bool = True) -> dict[s
         "boxes": [],
         "box_format": "normalized_xyxy",
         "request_id": "",
+        "mean_confidence": None,
+        "line_confidences": [],
         "error": error,
     }
 
@@ -113,30 +151,99 @@ def _parse_response(payload: dict[str, Any], config: GLMOCRConfig) -> dict[str, 
         "boxes": boxes,
         "box_format": "normalized_xyxy",
         "request_id": str(payload.get("request_id", "") or ""),
+        "mean_confidence": None,
+        "line_confidences": [],
+        "error": None,
+    }
+
+
+def _normalize_polygon(points: Any, width: int, height: int) -> list[float]:
+    if not isinstance(points, list) or not points:
+        return []
+    xs = [float(point.get("x", 0)) for point in points if isinstance(point, dict)]
+    ys = [float(point.get("y", 0)) for point in points if isinstance(point, dict)]
+    if not xs or not ys or width <= 0 or height <= 0:
+        return []
+    return [
+        max(0.0, min(1.0, min(xs) / width)),
+        max(0.0, min(1.0, min(ys) / height)),
+        max(0.0, min(1.0, max(xs) / width)),
+        max(0.0, min(1.0, max(ys) / height)),
+    ]
+
+
+def _parse_aliyun_response(payload: dict[str, Any], config: AliyunOCRConfig) -> dict[str, Any]:
+    width = int(payload.get("width", 0) or 0)
+    height = int(payload.get("height", 0) or 0)
+    words = payload.get("prism_wordsInfo") or []
+    texts = [
+        str(row.get("word", "")).strip()
+        for row in payload.get("prism_rowsInfo") or []
+        if str(row.get("word", "")).strip()
+    ]
+    if not texts:
+        content = str(payload.get("content", "") or "").strip()
+        texts = [content] if content else []
+    boxes = []
+    confidences = []
+    for word in words if isinstance(words, list) else []:
+        if not isinstance(word, dict):
+            continue
+        box = _normalize_polygon(word.get("pos"), width, height)
+        if box:
+            boxes.append(box)
+        if word.get("prob") is not None:
+            try:
+                confidences.append(max(0.0, min(1.0, float(word["prob"]) / 100.0)))
+            except (TypeError, ValueError):
+                pass
+    return {
+        "success": True,
+        "available": True,
+        "provider": config.provider,
+        "model": config.model,
+        "texts": texts,
+        "boxes": boxes,
+        "box_format": "normalized_xyxy",
+        "request_id": str(payload.get("sid", "") or ""),
+        "mean_confidence": (
+            round(float(sum(confidences) / len(confidences)), 6)
+            if confidences else None
+        ),
+        "line_confidences": [round(value, 6) for value in confidences],
         "error": None,
     }
 
 
 class OCRClient:
-    """只支持 GLM-OCR 的同步客户端，返回统一结构供 Agent Tool 使用。"""
+    """Synchronous OCR client with a provider-neutral response."""
 
     def __init__(self, config: Optional[GLMOCRConfig] = None, **legacy: Any):
         if config is None:
-            config = GLMOCRConfig(
-                endpoint=legacy.get("endpoint", GLMOCRConfig.endpoint),
-                api_key=legacy.get("api_key", ""),
-                timeout=int(legacy.get("timeout", GLMOCRConfig.timeout)),
+            config = AliyunOCRConfig(
+                endpoint=legacy.get("endpoint", AliyunOCRConfig.endpoint),
+                appcode=legacy.get("appcode", ""),
+                timeout=int(legacy.get("timeout", AliyunOCRConfig.timeout)),
             )
-        if config.provider != "glm_ocr" or config.model != "glm-ocr":
-            raise ValueError("本项目 OCR Provider 已冻结为 glm_ocr / glm-ocr")
+        if config.provider not in {"aliyun_market_ocr", "glm_ocr"}:
+            raise ValueError(f"不支持的 OCR Provider: {config.provider}")
         self.config = config
 
     @classmethod
     def from_config(cls, path: str) -> "OCRClient":
+        with open(path, "r", encoding="utf-8") as file:
+            raw = yaml.safe_load(file) or {}
+        if "aliyun_market_ocr" in raw:
+            return cls(AliyunOCRConfig.from_yaml(path))
         return cls(GLMOCRConfig.from_yaml(path))
 
     def available(self) -> bool:
-        return bool(self.config.endpoint and self.config.api_key and self.config.model)
+        credential = (
+            self.config.appcode
+            if self.config.provider == "aliyun_market_ocr"
+            else self.config.api_key
+        )
+        return bool(self.config.endpoint and credential and self.config.model)
 
     def recognize(self, image_bytes: bytes) -> dict[str, Any]:
         if not self.available():
@@ -148,16 +255,36 @@ class OCRClient:
         except ValueError as exc:
             return _failure(self.config, str(exc))
 
-        request_body = {
-            "model": self.config.model,
-            "file": f"data:{mime_type};base64,{base64.b64encode(prepared).decode('ascii')}",
-            "return_crop_images": self.config.return_crop_images,
-            "need_layout_visualization": self.config.need_layout_visualization,
-        }
-        headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
-            "Content-Type": "application/json",
-        }
+        encoded = base64.b64encode(prepared).decode("ascii")
+        if self.config.provider == "aliyun_market_ocr":
+            request_body = {
+                "img": encoded,
+                "prob": self.config.prob,
+                "charInfo": self.config.char_info,
+                "rotate": self.config.rotate,
+                "table": self.config.table,
+                "sortPage": self.config.sort_page,
+                "noStamp": self.config.no_stamp,
+                "figure": self.config.figure,
+                "row": self.config.row,
+                "paragraph": self.config.paragraph,
+                "oricoord": self.config.oricoord,
+            }
+            headers = {
+                "Authorization": f"APPCODE {self.config.appcode}",
+                "Content-Type": "application/json; charset=UTF-8",
+            }
+        else:
+            request_body = {
+                "model": self.config.model,
+                "file": f"data:{mime_type};base64,{encoded}",
+                "return_crop_images": self.config.return_crop_images,
+                "need_layout_visualization": self.config.need_layout_visualization,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.config.api_key}",
+                "Content-Type": "application/json",
+            }
         try:
             response = requests.post(
                 self.config.endpoint,
@@ -169,6 +296,8 @@ class OCRClient:
             payload = response.json()
             if not isinstance(payload, dict):
                 return _failure(self.config, "invalid_response")
+            if self.config.provider == "aliyun_market_ocr":
+                return _parse_aliyun_response(payload, self.config)
             return _parse_response(payload, self.config)
         except requests.Timeout:
             return _failure(self.config, "timeout")

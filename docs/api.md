@@ -9,7 +9,9 @@
 | `GET` | `/health` | 检查后端、Agent 与视觉模型是否已初始化 |
 | `POST` | `/api/review` | 上传单张图片并取得审核建议 |
 
-默认服务地址为 `http://localhost:8000`。若启动时设置了 `BACKEND_PORT`，端口以环境变量为准。当前未配置 CORS；前后端不同源时应由前端开发服务器反向代理到后端，或后续在 FastAPI 中显式配置允许的来源。
+默认服务地址为 `http://localhost:8000`。若启动时设置了 `BACKEND_PORT`，端口以环境变量为准。
+后端默认允许 `localhost` 与 `127.0.0.1` 的任意端口跨域访问；部署到其他域名时需要扩展
+`backend/api.py` 中的 CORS 白名单，或由同源反向代理提供服务。
 
 ## 2. 图片审核
 
@@ -43,6 +45,8 @@ HTTP 200，固定只有两个字段：
 | `suggestion` | string | 面向运营的正常建议或降级说明 |
 
 违规等级、置信度、OCR、低层特征、工具轨迹和 `trained` 状态不返回前端，只写入后端日志。
+正常建议以程序生成的“审核结果；处置”开头，后面的解释由 LLM 基于完整
+`decision_evidence` 生成。LLM 不能改变处置；解释失败或出现其他动作时，服务自动返回确定性模板。
 
 当前业务降级也返回 HTTP 200 和 `{id, suggestion}`。例如 DeepSeek/Agent 异常时：
 
@@ -100,14 +104,17 @@ HTTP 200 示例：
 | `model_loaded` | boolean | 真实视觉模型或 Mock Engine 是否可用 |
 | `mock` | boolean | `true` 表示模拟模式，`false` 表示真实视觉引擎 |
 
-`/health` 不会调用 DeepSeek、GLM-OCR，也不产生模型 API 费用。当前接口尚不返回 `model_trained`、GPU、LLM/OCR 连通性；因此 `mock=false` 只表示使用真实 FG-CLIP2 引擎，不代表分类头已经训练。当前联调配置使用随机分类头，日志中的 `trained=false` 才是准确状态。
+`/health` 不会调用 DeepSeek、OCR，也不产生模型 API 费用。当前接口尚不返回 GPU、
+LLM/OCR 连通性；`mock=false` 只表示使用真实 FG-CLIP2 引擎。当前真实运行配置通过
+`model.require_checkpoint=true` 强制加载训练后的 LoRA、四任务头、binary injury 和 quality fusion，
+加载失败时服务不会进入 ready 状态。具体 checkpoint 是否完整仍以启动日志和单次审核日志为准。
 
 ## 4. 超时口径
 
 当前配置：
 
 - DeepSeek 单次请求超时：60 秒；
-- GLM-OCR 单次请求超时：20 秒；
+- 阿里云 OCR 单次请求超时：60 秒；
 - Agent 最大轮次：5；
 - 后端没有整个 `/api/review` 请求级总超时；
 - 后端没有实现专用 HTTP 504 响应。
@@ -158,8 +165,9 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 ## 6. 当前内部保证
 
 - `analyze_image`（FG-CLIP2）必须成功调用；Agent 提前提交会被调用守卫拒绝。
-- `ocr_image` 和 `analyze_lowlevel` 由 DeepSeek 按需调用。
-- GLM-OCR 只返回文字证据，不承担图片语义裁决。
+- `analyze_image` 会执行轻量低层文字探测；完整低层分析可再由 Agent 调用。
+- `ocr_image` 在文字扭曲、疑似文字或文字探测失败时由程序自动触发。
+- OCR 只返回文字、坐标和置信度证据，不承担图片语义裁决。
 - RAG 默认启用；取得 CLIP 证据后，Agent 可按需调用 `search_knowledge` 检索本地规则与案例。可通过 `features.rag_enabled=false` 关闭。
 - LLM 不接收原始图片，只接收工具生成的文字证据。
 - 同一请求重复调用 CLIP 使用请求级缓存，不重复执行 GPU 推理。
@@ -170,11 +178,11 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 截至当前版本：
 
 - 真实 FG-CLIP2 原始权重可在 RTX 5060 Ti/CUDA 环境加载并推理；
-- DeepSeek-V4-Flash 能完成工具调用与最终裁决；
-- 一次真实链路为 `analyze_image → analyze_lowlevel → finalize_review`；
-- GLM-OCR 使用 Base64 data URI 的真实请求已成功；
+- DeepSeek-V4-Flash 能完成工具调用，并在程序锁定动作后生成最终解释；
+- 一次真实链路为 `analyze_image → 自动 OCR / 场景概念 → finalize_review → LLM 解释`；
+- 阿里云高精版 OCR 的真实请求已成功；
 - RAG 已接入本地规则库，检索分数不是违规概率；最终处置沿用程序规则；
-- 自动化测试 48 项通过（含数据集构建与推理配置契约测试）；
+- 自动化测试 138 项通过，覆盖策略、OCR、RAG、场景概念、完整证据和解释回退；
 - 上述后端内部变化没有修改前端请求字段和响应结构。
 
 ## 8. 前端联调检查表
@@ -185,5 +193,5 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - loading 和客户端超时分别处理；
 - 请求超时暂设为 120 秒；
 - `/health.mock=true` 时明确标识模拟结果；
-- `/health.mock=false` 也不能据此判断模型已经训练；
+- `/health.mock=false` 只表示真实视觉引擎已加载，不代表 OCR/LLM 外部服务可用；
 - 不依赖任何未写入本契约的内部字段。

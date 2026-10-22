@@ -1,0 +1,7 @@
+# Open-vocabulary scene concepts. The branch is explanation-only and is
+# available only after CLIP reports a non-safe risk candidate.
+enabled: true
+prompts_path: "knowledge/scene_concepts.json"
+risk_margin_threshold: -0.001031020122095945
+safe_context_threshold: 0.006
+top_k: 3

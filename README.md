@@ -44,9 +44,10 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 填写两个文件中的 `api_key`：
 
 - `config/llm.yaml`：DeepSeek，裁决与血腥视觉复核共用此 key。
-- `config/ocr.yaml`：GLM-OCR。
+- `config/ocr.yaml`：OCR。默认接入阿里云高精版 AppCode 接口，旧的 GLM-OCR 仍兼容。
 
-也可在启动终端设置 `LLM_API_KEY`、`OCR_API_KEY` 环境变量覆盖密钥，但仍需保留上述配置文件。实际密钥文件已被 Git 忽略。
+也可在启动终端设置 `LLM_API_KEY`、`ALIYUN_OCR_APPCODE`（旧 GLM Provider 使用
+`OCR_API_KEY`）环境变量覆盖密钥，但仍需保留上述配置文件。实际密钥文件已被 Git 忽略。
 
 ## 4. 启动后端
 
@@ -76,8 +77,24 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 - `config/inference.yaml`：已标定的暴力类型、图像质量阈值。
 - `backend/config.yaml` → `vision_review.enabled`：血腥视觉复核开关。
+- `backend/config.yaml` → `features.llm_explanation_enabled`：程序裁决后由 LLM 生成解释；关闭或解释校验失败时使用确定性模板。
 - 复核仅在暴力类型只命中“无暴力”、血腥候选不是“无血腥”，且血腥分数低于 `0.65` 或前两名分差小于 `0.20` 时触发。每次请求最多调用一次，前端只显示复核结果。
 - `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
+
+阿里云 OCR 配置见 [ALIYUN_OCR.md](docs/ALIYUN_OCR.md)。AppCode 只放在本地
+`config/ocr.yaml` 或 `ALIYUN_OCR_APPCODE` 环境变量中。
+
+文字扭曲 OCR 小样本结果见
+[OCR_TEXT_DISTORTION_PILOT_2026-10-22.md](docs/OCR_TEXT_DISTORTION_PILOT_2026-10-22.md)。
+
+开放词汇场景概念作为受控旁路工具，只在 CLIP 风险非 L0 时启用，不改变分类头：
+
+```text
+config/scene_concepts.yaml
+knowledge/scene_concepts.json
+```
+
+实验和门控结果见 [SCENE_CONCEPT_EXPERIMENT_2026-10-23.md](docs/SCENE_CONCEPT_EXPERIMENT_2026-10-23.md)。
 
 配置修改后重启后端。
 
@@ -88,3 +105,35 @@ Agent 成功取得视觉证据后，可按需查询相关规则；最终处置�
 55 条查询用于阈值校准，不代表独立测试或真实图片审核准确率。
 
 详细说明见 [RAG 与前端实现说明](docs/RAG与前端实现说明.md)。
+
+## 硬探针与 binary injury
+
+`pic/pic/` 中的 90 张图片用于冻结硬探针评估，不参与训练。当前流程在原有四分类 injury 之外增加一个冻结视觉塔的 binary injury head：
+
+- binary head 负责“是否存在血腥”的校准判断；
+- 四分类 injury 继续负责轻微、中度、严重；
+- binary 与风险/后果展示候选冲突时进入人工复核；
+- 外部 LLM 识图默认关闭。
+
+训练、评估命令和最新指标见 [HARD_PROBE_2026-10-21.md](docs/HARD_PROBE_2026-10-21.md)。
+最终 180 张冻结盲测见 [SOLID_BLIND_2026-10-21.md](docs/SOLID_BLIND_2026-10-21.md)。
+
+## 质量退化检测
+
+质量头已升级为 FG-CLIP2 embedding 与低层清晰度、频域、暗块和块边界特征的融合头：
+
+```text
+checkpoints/best/quality_fusion/
+```
+
+严重模糊、文字扭曲和故意遮挡作为证据可靠性提示；`X_无法判定` 或内容证据冲突会触发人工复核。180 张质量探针、固定开发/盲测划分和最终指标见
+[QUALITY_PROBE_2026-10-22.md](docs/QUALITY_PROBE_2026-10-22.md)。
+
+当前策略版本为 `2026-10-23-v4`：高置信、无冲突的 L0 可以放行；分数缺失、
+内容头冲突、风险 X、二元血腥与四分类血腥冲突或其他证据不足统一进入人工复核，
+不再采用“不确定放行”。
+
+v4 冻结回归见
+[POLICY_V4_REGRESSION_2026-10-23.md](docs/POLICY_V4_REGRESSION_2026-10-23.md)：
+quality 违规图自动放行由 20/60 降至 3/60，安全图仍为 0 张自动限流或下架；
+总人工复核由 13 张增至 32 张，这是当前明确的安全与人工成本权衡。

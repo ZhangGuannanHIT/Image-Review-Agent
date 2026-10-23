@@ -5,7 +5,7 @@
 # 核心
 torch>=2.7.0            # 用 cu128 wheel 安装：uv pip install torch --index-url https://download.pytorch.org/whl/cu128
 torchvision>=0.18.0
-transformers>=4.40.0
+transformers>=5.16.1
 safetensors
 accelerate
 
@@ -29,6 +29,9 @@ langchain-core
 # 数据处理
 Pillow
 PyYAML
-opencv-python          # 低层像素特征兜底（lowlevel.py）
+opencv-python-headless          # 低层像素特征兜底（lowlevel.py）
 
-# RAG 使用标准库字符 n-gram TF-IDF，无额外依赖；OCR 走外接 API。
+# 本地场景文字检测、OCR 与疑难文字核对
+rapidocr==3.10.0
+easyocr==1.7.2
+onnxruntime==1.31.0

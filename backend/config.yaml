@@ -19,6 +19,14 @@ model:
   device: "cuda"
   lora: true                 # 加载训练后的视觉 LoRA adapter
   require_checkpoint: true   # 必须同时加载 LoRA adapter 与分类头
+  binary_injury_dir: "checkpoints/best/injury_binary"
+  quality_fusion_dir: "checkpoints/best/quality_fusion"
+
+evidence_pipeline:
+  enabled: true
+  model_dir: "local_models/glm_ocr"
+  rapid_dir: "local_models/rapidocr"
+  easy_dir: "local_models/easyocr"
 
 features:
   ocr_enabled: true

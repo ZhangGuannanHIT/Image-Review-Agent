@@ -45,6 +45,7 @@ class ReviewService:
         save_images: bool = True,
         vision_client: Any = None,
         vision_gate: dict | None = None,
+        evidence_pipeline: Any = None,
     ):
         self.llm_model = llm_model
         self.engine = engine
@@ -59,7 +60,8 @@ class ReviewService:
             vision_client=vision_client,
             vision_gate=VisionGate(**(vision_gate or {})),
         )
-        self.agent = build_agent(
+        self.evidence_pipeline = evidence_pipeline
+        self.agent = evidence_pipeline or build_agent(
             llm_model,
             self.tools,
             system_prompt=build_system_prompt(rag_enabled=rag_enabled),
@@ -76,6 +78,11 @@ class ReviewService:
                                "trained": bool(getattr(engine, "trained", False)),
                                "type_thresholds": getattr(engine, "type_thresholds", {}),
                                "quality_thresholds": getattr(engine, "quality_thresholds", {})}
+        self.model_identity.update(
+            binary_injury_loaded=getattr(engine, "binary_head", None) is not None,
+            binary_threshold=getattr(engine, "binary_threshold", None),
+            quality_fusion_loaded=getattr(engine, "quality_fusion_head", None) is not None,
+            evidence_pipeline=bool(evidence_pipeline))
         checkpoint = self.model_identity["checkpoint"]
         if checkpoint:
             self.model_identity["sha256"] = {
@@ -136,6 +143,23 @@ class ReviewService:
                     for item in (matches or []) if isinstance(item, dict)
                 ]
             sanitized["search_knowledge"] = safe_searches
+        def redact(value):
+            if isinstance(value, str):
+                return ReviewService._redact_text(value)
+            if isinstance(value, dict):
+                return {k: redact(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [redact(v) for v in value]
+            return value
+        for name in ("assess_text", "retry_text", "assess_text_retry", "explain_decision",
+                     "review_visual_evidence", "review_text_evidence",
+                     "audit_weak_weapon_1", "audit_weak_weapon_2", "audit_weak_weapon_3"):
+            if name in sanitized:
+                sanitized[name] = redact(sanitized[name])
+        if "retrieve_text_rules" in sanitized:
+            value = sanitized["retrieve_text_rules"]
+            if isinstance(value, list):
+                sanitized["retrieve_text_rules"] = [{"id": x.get("id"), "score": x.get("score")} for x in value]
         return sanitized
 
     def _log(self, record: dict[str, Any]) -> None:
@@ -202,9 +226,16 @@ class ReviewService:
             suggestion = extract_suggestion(result)
             context = tools_mod.get_request_context()
             log["agent_suggestion"] = suggestion
-            if result.get("clip_succeeded") and "analyze_image" in context.cache:
+            if self.evidence_pipeline and result.get("decision"):
+                log["decision"] = result["decision"]
+            elif result.get("clip_succeeded") and "analyze_image" in context.cache:
                 decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
-                suggestion = render(decision)
+                if self.evidence_pipeline:
+                    from .evidence_review import render_evidence
+                    decision.update(review_hint=True, review_reason="审核工具未完成，建议人工核对。")
+                    suggestion = render_evidence(decision)
+                else:
+                    suggestion = render(decision)
                 log["decision"] = decision
             log["evidence_text"] = context.cache.get("analyze_image_text", "")
             log["messages"] = [
@@ -230,8 +261,19 @@ class ReviewService:
             suggestion = "审核流程暂不可用，无法完成本次审核，请稍后重试。"
             context = tools_mod.get_request_context()
             if "analyze_image" in context.cache:
-                decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
-                suggestion = render(decision)
+                if self.evidence_pipeline:
+                    from .evidence_policy import combine
+                    decision = combine(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"),
+                        context.cache.get("assess_text"), (context.cache.get("ocr_image") or {}).get("text", ""),
+                        "ocr_image" in context.cache)
+                else:
+                    decision = decide(context.cache["analyze_image"], self.policy, context.cache.get("review_blood"))
+                if self.evidence_pipeline:
+                    from .evidence_review import render_evidence
+                    decision.update(review_hint=True, review_reason="审核工具未完成，建议人工核对。")
+                    suggestion = render_evidence(decision)
+                else:
+                    suggestion = render(decision)
                 log["decision"] = decision
             log.update({
                 "error": f"{type(exc).__name__}: {exc}",

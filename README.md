@@ -38,15 +38,28 @@ fg_clip/
 
 ```powershell
 Copy-Item config/llm.example.yaml config/llm.yaml
-Copy-Item config/ocr.example.yaml config/ocr.yaml
 ```
 
-填写两个文件中的 `api_key`：
+填写 `config/llm.yaml` 中的 `api_key`；也可通过 `LLM_API_KEY` 环境变量覆盖。文字语义判断、血腥核验、视觉关系核验和专项读字共用该配置，所选模型及 API 必须支持图片输入。实际密钥文件已被 Git 忽略。
 
-- `config/llm.yaml`：DeepSeek，裁决与血腥视觉复核共用此 key。
-- `config/ocr.yaml`：GLM-OCR。
+首次准备本地 OCR 模型（需要联网；已有完整模型时可跳过）：
 
-也可在启动终端设置 `LLM_API_KEY`、`OCR_API_KEY` 环境变量覆盖密钥，但仍需保留上述配置文件。实际密钥文件已被 Git 忽略。
+```powershell
+.\.venv\Scripts\python.exe setup_local_models.py
+.\.venv\Scripts\python.exe setup_local_models.py --check
+```
+
+脚本从 [GLM-OCR 官方仓库](https://huggingface.co/zai-org/GLM-OCR) 下载固定版本，并使用 RapidOCR、EasyOCR 自带下载器准备其模型。也可以将以下目录从已有环境复制过来。模型文件不上传 GitHub。
+
+```text
+local_models/glm_ocr/       # 完整 GLM-OCR 模型、处理器与 tokenizer，权重约 2.65 GB
+local_models/rapidocr/      # PP-OCRv6_det_small.onnx、PP-OCRv6_rec_small.onnx、ch_ppocr_mobile_v2.0_cls_mobile.onnx
+local_models/easyocr/       # craft_mlt_25k.pth、english_g2.pth
+checkpoints/best/injury_binary/  # head.pt、metadata.json
+checkpoints/best/quality_fusion/ # head.pt、metadata.json
+```
+
+请在启动前完成模型准备。路径在 `backend/config.yaml` 的 `evidence_pipeline` 中配置。
 
 ## 4. 启动后端
 
@@ -74,17 +87,12 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 ## 可调整的运行配置
 
-- `config/inference.yaml`：已标定的暴力类型、图像质量阈值。
-- `backend/config.yaml` → `vision_review.enabled`：血腥视觉复核开关。
-- 复核仅在暴力类型只命中“无暴力”、血腥候选不是“无血腥”，且血腥分数低于 `0.65` 或前两名分差小于 `0.20` 时触发。每次请求最多调用一次，前端只显示复核结果。
-- `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
+- `config/inference.yaml`：CLIP 类型、图像质量阈值。
+- `backend/config.yaml` → `evidence_pipeline.enabled: true`：启用最终证据流程。CLIP 先识别，按需检测文字、OCR、检索本地规则和核验语义。
+- 视觉证据导致限流或下架、且没有独立文字违规证据时，触发视觉关系工具，分别核对伤害、攻击和武器指向对象。排除视觉证据前统一核对文字，防止检测漏框造成文字威胁漏放；疑难 OCR 也会触发专项读字。
+- `vision_review.enabled`：前置血腥复核开关。该前置工具只在“无暴力”且有血腥候选、分数低于 `0.65` 或前两名分差小于 `0.20` 时触发；不控制上述视觉关系工具。
+- 每次审核给出放行、限流或下架。关键证据无法核实时才附加人工核对提示；原始分数、工具输出和原图保存在 `backend/logs/`。
+- `audit.save_images`：是否保存原图。日志与图片不上传 GitHub。
+- `features.rag_enabled`：本地知识库检索开关。`knowledge/` 已随仓库提供，无需启动额外数据库或服务。
 
 配置修改后重启后端。
-
-## 本地 RAG
-
-已实现字符 n-gram TF-IDF 检索，无需额外模型或向量数据库。知识库包含 15 条规则、4 条核验案例、1 条教学案例。
-Agent 成功取得视觉证据后，可按需查询相关规则；最终处置继续使用现有程序规则。
-55 条查询用于阈值校准，不代表独立测试或真实图片审核准确率。
-
-详细说明见 [RAG 与前端实现说明](docs/RAG与前端实现说明.md)。

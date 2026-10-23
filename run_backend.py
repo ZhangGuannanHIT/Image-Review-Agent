@@ -35,6 +35,7 @@ def main():
     cfg = load_config()
     mode = cfg.get("runtime", {}).get("mode", "real")
     vision_client = None
+    evidence_pipeline = None
     features = cfg.get("features", {})
     from backend.service import ReviewService
     from backend.api import init_service
@@ -64,15 +65,25 @@ def main():
             strict_load=True,
             type_thresholds=inference_cfg.get("type_thresholds"),
             quality_thresholds=inference_cfg.get("quality_thresholds"),
+            binary_injury_dir=os.path.join(_REPO_ROOT, cfg["model"]["binary_injury_dir"]) if cfg["model"].get("binary_injury_dir") else "",
+            quality_fusion_dir=os.path.join(_REPO_ROOT, cfg["model"]["quality_fusion_dir"]) if cfg["model"].get("quality_fusion_dir") else "",
         )
         if cfg["model"].get("require_checkpoint", True) and not engine.trained:
             raise RuntimeError("真实模式需要已训练的 checkpoint（LoRA adapter + head.pt）")
         ocr_client = None
         if features.get("ocr_enabled", True):
-            ocr_config_path = cfg.get("ocr_config_path", "config/ocr.yaml")
-            if not os.path.isabs(ocr_config_path):
-                ocr_config_path = os.path.join(_REPO_ROOT, ocr_config_path)
-            ocr_client = OCRClient.from_config(ocr_config_path)
+            if cfg.get("evidence_pipeline", {}).get("enabled", False):
+                from backend.local_ocr import LocalSceneOCR
+                local = cfg["evidence_pipeline"]
+                ocr_client = LocalSceneOCR(
+                    os.path.join(_REPO_ROOT, local["model_dir"]),
+                    os.path.join(_REPO_ROOT, local["rapid_dir"]),
+                    os.path.join(_REPO_ROOT, local["easy_dir"]), device=engine.device)
+            else:
+                ocr_config_path = cfg.get("ocr_config_path", "config/ocr.yaml")
+                if not os.path.isabs(ocr_config_path):
+                    ocr_config_path = os.path.join(_REPO_ROOT, ocr_config_path)
+                ocr_client = OCRClient.from_config(ocr_config_path)
         llm_config_path = cfg.get("llm_config_path", "config/llm.yaml")
         if not os.path.isabs(llm_config_path):
             llm_config_path = os.path.join(_REPO_ROOT, llm_config_path)
@@ -81,6 +92,13 @@ def main():
         if cfg.get("vision_review", {}).get("enabled", False):
             from backend.vision import DeepSeekBloodReviewer
             vision_client = DeepSeekBloodReviewer(llm_client.config)
+        if cfg.get("evidence_pipeline", {}).get("enabled", False):
+            if ocr_client is None:
+                raise ValueError("证据流程需要启用本地 OCR")
+            from backend.evidence_pipeline import EvidencePipeline
+            evidence_pipeline = EvidencePipeline(engine, ocr_client, llm_model,
+                vision_client=vision_client, vision_gate=cfg.get("vision_review", {}).get("trigger"),
+                decision_policy=cfg.get("decision_policy"), rag_enabled=features.get("rag_enabled", True))
     else:
         raise ValueError(f"不支持的 runtime.mode: {mode}")
 
@@ -96,7 +114,8 @@ def main():
         decision_policy=cfg.get("decision_policy"),
         vision_client=vision_client,
         vision_gate=cfg.get("vision_review", {}).get("trigger"),
-        save_images=cfg.get("audit", {}).get("save_images", True))
+        save_images=cfg.get("audit", {}).get("save_images", True),
+        evidence_pipeline=evidence_pipeline)
 
     init_service(service, max_image_mb=cfg["server"].get("max_image_mb", 10))
 

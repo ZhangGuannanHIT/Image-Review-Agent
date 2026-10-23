@@ -27,6 +27,7 @@ secrets/
 # 不加斜杠是为了同时忽略"软链接形式的 fg_clip"（git 不把软链接当目录）
 /fg_clip
 /fg_clip/
+/local_models/
 /checkpoints/*
 !/checkpoints/best/
 *.safetensors
@@ -52,6 +53,8 @@ secrets/
 # Small deployment checkpoint is intentionally versioned.
 !/checkpoints/best/adapter_model.safetensors
 !/checkpoints/best/head.pt
+!/checkpoints/best/injury_binary/head.pt
+!/checkpoints/best/quality_fusion/head.pt
 /fgclip_train_2026-10-18/
 
 # 本地打包与前端测试预览

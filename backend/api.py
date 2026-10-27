@@ -18,7 +18,7 @@ from PIL.Image import DecompressionBombError
 from .schemas import ErrorResponse, HealthResponse, ReviewResponse
 from .service import ReviewService
 
-app = FastAPI(title="违规内容审核系统", version="0.4")
+app = FastAPI(title="违规内容审核系统", version="0.5")
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(?:localhost|127\.0\.0\.1)(?::[0-9]+)?",

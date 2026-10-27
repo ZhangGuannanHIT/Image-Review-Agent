@@ -13,7 +13,7 @@ from src.labels import TYPE_CLASSES, INJURY_CLASSES
 
 class VisionTests(unittest.TestCase):
     def test_json_fence_and_invalid_response_diagnostics(self):
-        from tests.test_agent_api import image_bytes
+        from tests.test_workflow_api import image_bytes
         from langchain_core.messages import AIMessage
         payload = '{"verdict":"not_supported","severity":"none","observation":"红色背景"}'
         self.assertEqual(parse_review('```json\n' + payload + '\n```').verdict, 'not_supported')
@@ -39,10 +39,10 @@ class VisionTests(unittest.TestCase):
                 item['type']['labels'] = labels
                 self.assertFalse(trigger(item, VisionGate())['eligible'])
 
-    def test_agent_automatically_reviews_and_logs_before_finalize(self):
+    def test_fixed_workflow_reviews_blood_and_logs(self):
         from backend.service import ReviewService
         from backend.mock import RuleBasedMockChatModel
-        from tests.test_agent_api import image_bytes
+        from tests.test_workflow_api import image_bytes
         reviewer, engine = Mock(), Mock()
         engine.predict.return_value = evidence(2, 2, .52)
         engine.ckpt_dir = ""
@@ -50,10 +50,20 @@ class VisionTests(unittest.TestCase):
         engine.quality_thresholds = {}
         reviewer.review.return_value = {"status": "ok", "verdict": "not_supported", "severity": "none", "observation": "只有红色背景"}
         with tempfile.TemporaryDirectory() as directory:
-            service = ReviewService(RuleBasedMockChatModel(), engine, log_dir=directory, vision_client=reviewer)
+            service = ReviewService(
+                RuleBasedMockChatModel(),
+                engine,
+                log_dir=directory,
+                vision_client=reviewer,
+                explanation_enabled=False,
+            )
             result = service.review(image_bytes())
             record = json.loads((Path(directory)/"review.log.jsonl").read_text(encoding="utf-8"))
-            self.assertEqual([s['name'] for s in record['steps']], ['analyze_image', 'review_blood', 'finalize_review'])
+            called = [
+                step["name"] for step in record["steps"]
+                if step["type"] == "tool_call"
+            ]
+            self.assertEqual(called, ["analyze_image", "review_blood", "detect_text"])
             self.assertIn('血腥复核：未发现血腥', result.suggestion)
             self.assertIn('处置：放行', result.suggestion)
             self.assertNotIn('以上为模型预测', result.suggestion)
@@ -70,7 +80,7 @@ class VisionTests(unittest.TestCase):
         self.assertTrue(trigger(close, gate)["eligible"])
         self.assertFalse(trigger({}, gate)["eligible"])
 
-    def test_tool_guard_auto_call_and_cache(self):
+    def test_review_blood_tool_is_explicit_and_cached(self):
         reviewer = Mock()
         reviewer.review.return_value = {"status": "ok", "verdict": "not_supported", "severity": "none", "observation": "红色衣物"}
         engine = Mock()
@@ -80,7 +90,8 @@ class VisionTests(unittest.TestCase):
         try:
             self.assertIn("skipped", tools["review_blood"].invoke({}))
             reviewer.review.assert_not_called()
-            result = tools["analyze_image"].invoke({})
+            tools["analyze_image"].invoke({})
+            result = tools["review_blood"].invoke({})
             self.assertIn("not_supported", result)
             tools["review_blood"].invoke({})
             tools["analyze_image"].invoke({})
@@ -138,7 +149,7 @@ class VisionTests(unittest.TestCase):
             BloodReview(verdict="not_supported", severity="severe", observation="不一致")
 
     def test_client_image_payload_and_no_clip_priming(self):
-        from tests.test_agent_api import image_bytes
+        from tests.test_workflow_api import image_bytes
         client = DeepSeekBloodReviewer.__new__(DeepSeekBloodReviewer)
         client.model_name = "deepseek-v4-flash"
         client.model = Mock()

@@ -43,7 +43,7 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 填写两个文件中的 `api_key`：
 
-- `config/llm.yaml`：DeepSeek，裁决与血腥视觉复核共用此 key。
+- `config/llm.yaml`：DeepSeek，用于最终解释与可选的血腥视觉复核。
 - `config/ocr.yaml`：OCR。默认接入阿里云高精版 AppCode 接口，旧的 GLM-OCR 仍兼容。
 
 也可在启动终端设置 `LLM_API_KEY`、`ALIYUN_OCR_APPCODE`（旧 GLM Provider 使用
@@ -78,6 +78,8 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 - `config/inference.yaml`：已标定的暴力类型、图像质量阈值。
 - `backend/config.yaml` → `vision_review.enabled`：血腥视觉复核开关。
 - `backend/config.yaml` → `features.llm_explanation_enabled`：程序裁决后由 LLM 生成解释；关闭或解释校验失败时使用确定性模板。
+- `backend/config.yaml` → `text_detection`：轻量文字检测参数；默认 `opencv_light`，无需模型权重。
+- `backend/config.yaml` → `anime_vision_review`：仅动漫高置信路由且动作非放行时调用视觉 LLM。
 - 复核仅在暴力类型只命中“无暴力”、血腥候选不是“无血腥”，且血腥分数低于 `0.65` 或前两名分差小于 `0.20` 时触发。每次请求最多调用一次，前端只显示复核结果。
 - `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
 
@@ -101,7 +103,7 @@ knowledge/scene_concepts.json
 ## 本地 RAG
 
 已实现字符 n-gram TF-IDF 检索，无需额外模型或向量数据库。知识库包含 15 条规则、4 条核验案例、1 条教学案例。
-Agent 成功取得视觉证据后，可按需查询相关规则；最终处置继续使用现有程序规则。
+固定工作流在 OCR 取得文本后查询相关规则；最终处置继续使用程序策略。
 55 条查询用于阈值校准，不代表独立测试或真实图片审核准确率。
 
 详细说明见 [RAG 与前端实现说明](docs/RAG与前端实现说明.md)。
@@ -112,7 +114,7 @@ Agent 成功取得视觉证据后，可按需查询相关规则；最终处置�
 
 - binary head 负责“是否存在血腥”的校准判断；
 - 四分类 injury 继续负责轻微、中度、严重；
-- binary 与风险/后果展示候选冲突时进入人工复核；
+- binary 明确阴性时否决血腥维度；若风险 L1/L2 没有独立攻击、威胁或文字支持，则按 `effective_risk` 区分真实冲突与风格假冲突；
 - 外部 LLM 识图默认关闭。
 
 训练、评估命令和最新指标见 [HARD_PROBE_2026-10-21.md](docs/HARD_PROBE_2026-10-21.md)。
@@ -129,11 +131,12 @@ checkpoints/best/quality_fusion/
 严重模糊、文字扭曲和故意遮挡作为证据可靠性提示；`X_无法判定` 或内容证据冲突会触发人工复核。180 张质量探针、固定开发/盲测划分和最终指标见
 [QUALITY_PROBE_2026-10-22.md](docs/QUALITY_PROBE_2026-10-22.md)。
 
-当前策略版本为 `2026-10-23-v4`：高置信、无冲突的 L0 可以放行；分数缺失、
-内容头冲突、风险 X、二元血腥与四分类血腥冲突或其他证据不足统一进入人工复核，
-不再采用“不确定放行”。
+当前策略版本为 `2026-10-26-effective-v5`：保留 `risk_raw`，由 binary、quality、
+场景 Prompt、OCR/RAG 和域证据生成独立的 `effective_risk`。AI 二次元假冲突可主动降级；
+真实域 L2、L3、X、近阈值、缺失分数和文字未完成仍需复核。
 
-v4 冻结回归见
-[POLICY_V4_REGRESSION_2026-10-23.md](docs/POLICY_V4_REGRESSION_2026-10-23.md)：
-quality 违规图自动放行由 20/60 降至 3/60，安全图仍为 0 张自动限流或下架；
-总人工复核由 13 张增至 32 张，这是当前明确的安全与人工成本权衡。
+固定流程、域策略、冻结探针和已知限制见
+[EFFECTIVE_POLICY_V5_2026-10-26.md](docs/EFFECTIVE_POLICY_V5_2026-10-26.md)。
+动漫风格路由与视觉触发见
+[ANIME_VISION_STRATEGY_2026-10-27.md](docs/ANIME_VISION_STRATEGY_2026-10-27.md)。
+架构见 [architecture.md](docs/architecture.md)。

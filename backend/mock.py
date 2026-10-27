@@ -3,10 +3,9 @@
 
 from __future__ import annotations
 
-import itertools
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 
 from src.engine import ModelOutput
 from src.labels import QUALITY_CLASSES
@@ -44,30 +43,12 @@ class MockOCRClient:
 
 
 class RuleBasedMockChatModel:
-    """最小工具调用模型：先调用 CLIP，再提交固定建议。"""
-
-    def __init__(self):
-        self._ids = itertools.count(1)
-
-    def bind_tools(self, tools):
-        return self
+    """Minimal explanation-only model used by local tests."""
 
     def invoke(self, messages):
-        tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
-        clip_messages = [m for m in tool_messages if getattr(m, "name", "") == "analyze_image"]
-        if not clip_messages:
-            return AIMessage(
-                content="",
-                tool_calls=[{
-                    "name": "analyze_image", "args": {},
-                    "id": f"mock-{next(self._ids)}", "type": "tool_call",
-                }],
-            )
-        suggestion = "该图片模拟判定为中度违规，涉及直接暴力，建议下架并由运营复核。"
         return AIMessage(
-            content="",
-            tool_calls=[{
-                "name": "finalize_review", "args": {"suggestion": suggestion},
-                "id": f"mock-{next(self._ids)}", "type": "tool_call",
-            }],
+            content=(
+                '{"explanation":"视觉候选与辅助证据已完成核对，'
+                '当前结论由程序处置规则生成。"}'
+            )
         )

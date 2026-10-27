@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from typing import Any, Callable
@@ -31,6 +32,7 @@ def assess_text_evidence(
             "status": "not_available",
             "has_text": False,
             "char_count": 0,
+            "text_sha256": "",
             "mean_confidence": None,
             "high_risk_rule_ids": [],
             "safe_context_rule_ids": [],
@@ -41,6 +43,7 @@ def assess_text_evidence(
             "status": "failed",
             "has_text": False,
             "char_count": 0,
+            "text_sha256": "",
             "mean_confidence": ocr.get("mean_confidence"),
             "high_risk_rule_ids": [],
             "safe_context_rule_ids": [],
@@ -86,6 +89,7 @@ def assess_text_evidence(
         "status": status,
         "has_text": char_count > 0,
         "char_count": char_count,
+        "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "mean_confidence": confidence_value,
         "high_risk_rule_ids": high_risk,
         "safe_context_rule_ids": safe_context,
@@ -94,7 +98,7 @@ def assess_text_evidence(
 
 
 def collect_knowledge_hits(cache: dict[str, Any]) -> list[dict[str, Any]]:
-    """Collect and deduplicate all Agent search_knowledge cache entries."""
+    """Collect and deduplicate cached knowledge-retrieval entries."""
     by_id: dict[str, dict[str, Any]] = {}
     for key, value in cache.items():
         if not key.startswith("search_knowledge:") or not isinstance(value, list):
@@ -137,6 +141,10 @@ def build_decision_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
             "quality": evidence.get("quality", {}),
         },
         "blood_binary": evidence.get("blood_binary"),
+        "anime_style": evidence.get("anime_style"),
+        "text_detection": evidence.get(
+            "text_detection", {"status": "not_available", "has_text": False}
+        ),
         "lowlevel": evidence.get("lowlevel", {"status": "not_available"}),
         "ocr": evidence.get("text_evidence", {"status": "not_available"}),
         "scene_concepts": evidence.get(

@@ -101,11 +101,24 @@ class TextEvidenceTests(unittest.TestCase):
         item["text_evidence"] = {
             "status": "readable",
             "safe_context_rule_ids": [],
+            "grounded_violation": True,
             "high_risk_rule_ids": ["R006"],
         }
         self.assertEqual(decide(item, DecisionPolicy())["action"], "limit")
 
-    def test_auto_ocr_when_quality_text_distortion(self):
+    def test_rag_high_risk_hit_without_grounding_requires_review(self):
+        item = evidence(0)
+        item["text_evidence"] = {
+            "status": "readable",
+            "safe_context_rule_ids": [],
+            "high_risk_rule_ids": ["R006"],
+            "grounded_violation": False,
+        }
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "review")
+        self.assertEqual(result["conflict_type"], "text_semantic_unresolved")
+
+    def test_quality_text_distortion_alone_does_not_trigger_ocr(self):
         class Engine:
             def predict(self, image):
                 return {
@@ -113,16 +126,30 @@ class TextEvidenceTests(unittest.TestCase):
                     "quality": {"labels": ["文字扭曲形变"], "scores": {}, "thresholds": {}},
                 }
 
+        class Detector:
+            method = "test-empty"
+
+            def detect(self, image):
+                return {
+                    "status": "empty",
+                    "has_text": False,
+                    "boxes": [],
+                    "box_count": 0,
+                    "method": self.method,
+                }
+
         token = set_current_image(png_bytes())
         try:
-            tools = tools_by_name(build_tools(Engine(), MockOCRClient(["测试文字"])))
-            content = tools["analyze_image"].invoke({})
-            self.assertIn("自动调用 OCR", content)
-            self.assertIn("测试文字", content)
+            tools = tools_by_name(build_tools(
+                Engine(), MockOCRClient(["测试文字"]), text_detector=Detector()
+            ))
+            result = tools["ocr_image"].invoke({})
+            self.assertIn("跳过 OCR", result)
+            self.assertNotIn("测试文字", result)
         finally:
             reset_current_image(token)
 
-    def test_collects_and_deduplicates_agent_knowledge(self):
+    def test_collects_and_deduplicates_cached_knowledge(self):
         hits = collect_knowledge_hits({
             "search_knowledge:a": [
                 {"id": "R006", "type": "regulation", "score": 0.4},
@@ -146,7 +173,8 @@ class TextEvidenceTests(unittest.TestCase):
         bundle = build_decision_evidence(item)
         self.assertEqual(
             set(bundle), {
-                "model_heads", "blood_binary", "lowlevel", "ocr", "scene_concepts",
+                "model_heads", "blood_binary", "anime_style",
+                "text_detection", "lowlevel", "ocr", "scene_concepts",
                 "search_knowledge",
             }
         )

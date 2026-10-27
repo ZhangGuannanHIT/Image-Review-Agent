@@ -82,10 +82,10 @@ class FinalExplanationTests(unittest.TestCase):
             set(payload), {"decision_evidence", "program_decision"}
         )
         self.assertIn("model_heads", payload["decision_evidence"])
-        self.assertEqual(payload["decision_evidence"]["lowlevel"]["status"], "ok")
-        self.assertIn(
-            "features", payload["decision_evidence"]["lowlevel"]
+        self.assertEqual(
+            payload["decision_evidence"]["lowlevel"]["status"], "not_called"
         )
+        self.assertIn("text_detection", payload["decision_evidence"])
         self.assertEqual(payload["program_decision"]["action"], "block")
 
     def test_explanation_cannot_emit_another_action_and_falls_back(self):

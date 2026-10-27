@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""审核 Agent 工具。
+"""Deterministic review tools.
 
-图片与工具缓存保存在请求级 ContextVar 中，LLM 只看到工具返回的文本证据。
-analyze_image 必须成功执行；其余证据工具由 ReAct Agent 按需选择。
+图片与工具缓存保存在请求级 ContextVar 中。工具由固定工作流按条件调用，
+不再由 LLM 选择。
 """
 
 from __future__ import annotations
@@ -106,7 +106,8 @@ def text_evidence(output: Any) -> str:
         "以下是模型预测，类别括号内是标签定义，不是观察到的具体事实。分数未经概率校准。"
         "type（暴力类型）和 quality（图像质量）为多标签，risk 和 injury 为单标签。"
         "blood_binary 是独立校准的血腥存在性证据，其阈值来自验证集，不能无视。"
-        "quality 标签可能表示严重模糊、文字扭曲或故意遮挡，程序会据此提高人工复核优先级。"
+        "quality 标签只表示严重模糊、文字扭曲或故意遮挡等可靠性提示；"
+        "OCR 是否执行由独立文字检测器决定。"
         "无暴力仅指无正在进行的暴力行为，可以与血腥、后果展示和暗示威胁共存。"
         "保留各类分数与阈值供比较，不能只凭最高类别断言存在伤口或血泊："
         + json.dumps(data, ensure_ascii=False)
@@ -119,6 +120,8 @@ def build_tools(
     ocr_client: Any = None,
     retriever: Any = None,
     *,
+    text_detector: Any = None,
+    enable_text_detection: bool = True,
     enable_ocr: bool = True,
     enable_lowlevel: bool = True,
     enable_rag: bool = True,
@@ -156,67 +159,47 @@ def build_tools(
             output = engine.predict(context.image)
             context.cache["analyze_image"] = _as_dict(output)
             context.cache["analyze_image_text"] = text_evidence(output)
-            text_probe_ok = True
-            text_suspected = False
+        return context.cache["analyze_image_text"]
+
+    @tool
+    def detect_text() -> str:
+        """轻量检测是否存在文字区域。只决定是否调用 OCR，不读取文字语义。"""
+        context = get_request_context()
+        if text_detector is None:
+            result = {
+                "status": "unavailable",
+                "has_text": False,
+                "boxes": [],
+                "box_count": 0,
+                "method": "not_configured",
+            }
+        elif "text_detection" not in context.cache:
             try:
-                lowlevel = lowlevel_mod.extract(context.image)
-                text_suspected = lowlevel_mod.has_much_text(lowlevel)
-                context.cache["analyze_lowlevel"] = lowlevel
-                context.cache["analyze_lowlevel_source"] = "automatic_text_probe"
+                result = text_detector.detect(context.image)
             except Exception as exc:  # noqa: BLE001
-                # 文字探测失败不能等同于“没有文字”，保守地禁止 L0 短路。
-                text_probe_ok = False
-                context.cache["text_probe_error"] = type(exc).__name__
-            context.cache["text_probe_ok"] = text_probe_ok
-            context.cache["text_suspected"] = text_suspected
-            context.cache["l0_short_circuit"] = bool(
-                is_l0_without_conflict(context.cache["analyze_image"])
-                and text_probe_ok
-                and not text_suspected
-            )
-        content = context.cache["analyze_image_text"]
-        if vision_client and trigger(context.cache["analyze_image"], gate)["eligible"]:
-            content += "\n程序按触发条件调用 review_blood 的独立复核结果：" + review_blood.invoke({})
-        quality_labels = context.cache["analyze_image"].get("quality", {}).get("labels", [])
-        short_circuit = bool(context.cache.get("l0_short_circuit", False))
-        text_suspected = bool(context.cache.get("text_suspected", False))
-        text_probe_ok = bool(context.cache.get("text_probe_ok", False))
-        if (
-            not short_circuit
-            and enable_ocr
-            and ocr_client
-            and (
-                "文字扭曲形变" in quality_labels
-                or text_suspected
-                or not text_probe_ok
-            )
-        ):
-            reason = (
-                "quality 命中文字扭曲"
-                if "文字扭曲形变" in quality_labels
-                else "低层文字探测失败" if not text_probe_ok else "检测到疑似文字"
-            )
-            content += f"\n程序因{reason}而自动调用 OCR：" + ocr_image.invoke({})
-        risk_label = context.cache["analyze_image"].get("risk", {}).get("label")
-        if not short_circuit and scene_scorer is not None and risk_label != "L0_安全":
-            try:
-                content += "\n程序自动调用场景概念匹配：" + match_scene_concepts.invoke({})
-            except Exception as exc:  # noqa: BLE001
-                content += (
-                    "\n场景概念工具失败："
-                    f"{type(exc).__name__}；基础 CLIP 证据仍然有效"
-                )
-        return content
+                result = {
+                    "status": "failed",
+                    "has_text": False,
+                    "boxes": [],
+                    "box_count": 0,
+                    "method": getattr(text_detector, "method", "unknown"),
+                    "error": type(exc).__name__,
+                }
+        else:
+            result = context.cache["text_detection"]
+        context.cache["text_detection"] = result
+        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def ocr_image() -> str:
         """可选。使用 OCR 提取广告、标语、字幕、水印等文字及置信度；只返回文字证据，不分析图片语义。"""
         context = get_request_context()
-        if (
-            "analyze_image" in context.cache
-            and context.cache.get("l0_short_circuit")
-        ):
-            return "CLIP 已判定 L0 且无内容冲突，程序跳过 OCR。"
+        if text_detector is not None:
+            if "text_detection" not in context.cache:
+                detect_text.invoke({})
+            detection = context.cache.get("text_detection", {})
+            if detection.get("status") == "empty":
+                return "文字检测未发现候选区域，程序跳过 OCR。"
         if "ocr_image" not in context.cache:
             result = ocr_client.recognize(context.image) if ocr_client else {
                 "success": False, "available": False, "texts": [], "boxes": [],
@@ -269,6 +252,15 @@ def build_tools(
                 safe_context_threshold=float(
                     scene_options.get("safe_context_threshold", 0.006)
                 ),
+                confounder_threshold=float(
+                    scene_options.get("confounder_threshold", 0.006)
+                ),
+                anime_score_threshold=float(
+                    scene_options.get("anime_score_threshold", 0.015)
+                ),
+                domain_margin_threshold=float(
+                    scene_options.get("domain_margin_threshold", 0.01)
+                ),
                 top_k=int(scene_options.get("top_k", 3)),
                 retrieve=retrieve,
             )
@@ -293,20 +285,15 @@ def build_tools(
         context = get_request_context()
         if "analyze_image_text" not in context.cache:
             raise RuntimeError("必须先成功调用 analyze_image，才能检索规则或判例")
-        if context.cache.get("l0_short_circuit"):
-            return "CLIP 已判定 L0 且无内容冲突，程序跳过 RAG 检索。"
         cache_key = knowledge_cache_key(query)
         if cache_key not in context.cache:
             context.cache[cache_key] = retrieve(query, k=5)
         cases = context.cache[cache_key]
         return "未检索到相关规则或判例" if not cases else json.dumps(cases, ensure_ascii=False)
 
-    @tool
-    def finalize_review(suggestion: str) -> str:
-        """提交面向运营的一句话最终审核建议。调用守卫会拒绝任何缺少成功 CLIP 分析的提交。"""
-        return suggestion.strip()
-
     tools: list[BaseTool] = [analyze_image]
+    if enable_text_detection:
+        tools.append(detect_text)
     if vision_client:
         tools.append(review_blood)
     if enable_ocr:
@@ -317,7 +304,6 @@ def build_tools(
         tools.append(search_knowledge)
     if scene_scorer is not None:
         tools.append(match_scene_concepts)
-    tools.append(finalize_review)
     return tools
 
 

@@ -35,6 +35,9 @@ def build_scene_evidence(
     *,
     risk_margin_threshold: float,
     safe_context_threshold: float,
+    confounder_threshold: float = 0.006,
+    anime_score_threshold: float = 0.015,
+    domain_margin_threshold: float = 0.01,
     top_k: int = 3,
     retrieve=None,
 ) -> dict:
@@ -63,15 +66,47 @@ def build_scene_evidence(
         key=lambda item: item["score"],
         reverse=True,
     )[:top_k]
+    domains = sorted(
+        (
+            {"key": key, **value}
+            for key, value in concepts.items() if value["kind"] == "domain"
+        ),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
     risk_max = risks[0]["score"] if risks else -1.0
     competing_max = max(
         [item["score"] for item in safe_contexts + confounders] or [-1.0]
+    )
+    confounder_max = max(
+        [item["score"] for item in confounders] or [-1.0]
     )
     risk_margin = risk_max - competing_max
     risk_matched = risk_margin >= risk_margin_threshold
     safe_matched = bool(
         safe_contexts and safe_contexts[0]["score"] >= safe_context_threshold
     )
+    confounder_matched = bool(
+        confounders and confounder_max >= confounder_threshold
+    )
+    domain_scores = {item["key"]: item["score"] for item in domains}
+    anime_score = float(domain_scores.get("anime_illustration", -1.0))
+    real_score = float(domain_scores.get("real_photo", -1.0))
+    anime_margin = anime_score - real_score
+    anime_matched = bool(
+        anime_score >= anime_score_threshold
+        and anime_margin >= domain_margin_threshold
+    )
+    domain = {
+        "effective": "anime_illustration" if anime_matched else "unknown",
+        "anime_matched": anime_matched,
+        "anime_score": round(anime_score, 6),
+        "real_score": round(real_score, 6),
+        "anime_margin": round(anime_margin, 6),
+        "anime_score_threshold": anime_score_threshold,
+        "domain_margin_threshold": domain_margin_threshold,
+        "candidates": domains,
+    }
     conflict = bool(risk_matched and safe_matched)
     queries = []
     if risk_matched:
@@ -114,13 +149,16 @@ def build_scene_evidence(
         "risk_scenes": risks,
         "safe_contexts": safe_contexts,
         "confounders": confounders,
+        "domains": domains,
+        "domain": domain,
         "risk_margin": risk_margin,
         "risk_matched": risk_matched,
         "safe_context_matched": safe_matched,
+        "confounder_matched": confounder_matched,
         "context_conflict": conflict,
         "rag_queries": queries,
         "knowledge_hits": unique_hits[:6],
-        "action_effect": "explanation_and_conflict_only",
+        "action_effect": "effective_risk_context",
     }
 
 

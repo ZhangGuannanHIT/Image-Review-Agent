@@ -60,6 +60,10 @@ secrets/
 !/checkpoints/best/quality_fusion/
 !/checkpoints/best/quality_fusion/head.pt
 !/checkpoints/best/quality_fusion/metadata.json
+!/checkpoints/anime_style_router/
+!/checkpoints/anime_style_router/README.md
+!/checkpoints/anime_style_router/router.pt
+!/checkpoints/anime_style_router/metadata.json
 /fgclip_train_2026-10-18/
 
 # 本地打包与前端测试预览

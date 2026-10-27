@@ -107,7 +107,7 @@ class SceneConceptTests(unittest.TestCase):
         finally:
             reset_current_image(token)
 
-    def test_non_l0_auto_calls_scene_tool(self):
+    def test_non_l0_scene_tool_runs_when_called_by_workflow(self):
         class Scorer:
             calls = 0
 
@@ -126,8 +126,9 @@ class SceneConceptTests(unittest.TestCase):
         token = set_current_image(png_bytes())
         try:
             tools = tools_by_name(build_tools(Engine(), scene_scorer=scorer))
-            content = tools["analyze_image"].invoke({})
-            self.assertIn("自动调用场景概念匹配", content)
+            tools["analyze_image"].invoke({})
+            content = tools["match_scene_concepts"].invoke({})
+            self.assertIn("anime_illustration", content)
             self.assertEqual(scorer.calls, 1)
         finally:
             reset_current_image(token)

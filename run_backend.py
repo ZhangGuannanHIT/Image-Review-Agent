@@ -35,11 +35,29 @@ def main():
     cfg = load_config()
     mode = cfg.get("runtime", {}).get("mode", "real")
     vision_client = None
+    anime_visual_reviewer = None
     scene_scorer = None
     scene_options = None
     features = cfg.get("features", {})
     from backend.service import ReviewService
     from backend.api import init_service
+    from backend.text_detection import (
+        LightweightTextDetector, RapidOCRTextDetector,
+    )
+
+    text_cfg = cfg.get("text_detection", {})
+    if text_cfg.get("provider", "opencv_light") == "rapidocr":
+        text_detector = RapidOCRTextDetector(
+            model_root_dir=text_cfg.get("rapidocr_model_dir", "")
+        )
+    else:
+        text_detector = LightweightTextDetector(
+            max_side=int(text_cfg.get("max_side", 1600)),
+            min_line_height=int(text_cfg.get("min_line_height", 7)),
+            min_layout_score=float(text_cfg.get("min_layout_score", 0.48)),
+            min_region_score=float(text_cfg.get("min_region_score", 0.52)),
+            min_aligned_glyphs=int(text_cfg.get("min_aligned_glyphs", 2)),
+        )
 
     if mode == "mock":
         from backend.mock import MockOCRClient, MockReviewEngine, RuleBasedMockChatModel
@@ -74,6 +92,17 @@ def main():
                 _REPO_ROOT,
                 cfg["model"].get("quality_fusion_dir", "checkpoints/best/quality_fusion"),
             ),
+            anime_style_router_dir=(
+                os.path.join(
+                    _REPO_ROOT,
+                    cfg["model"]["anime_style_router_dir"],
+                )
+                if cfg["model"].get("anime_style_router_dir")
+                else ""
+            ),
+            anime_style_min_score=float(
+                cfg["model"].get("anime_style_min_score", 0.90)
+            ),
         )
         if cfg["model"].get("require_checkpoint", True) and not engine.trained:
             raise RuntimeError("真实模式需要已训练的 checkpoint（LoRA adapter + head.pt）")
@@ -91,6 +120,13 @@ def main():
         if cfg.get("vision_review", {}).get("enabled", False):
             from backend.vision import DeepSeekBloodReviewer
             vision_client = DeepSeekBloodReviewer(llm_client.config)
+        anime_visual_cfg = cfg.get("anime_vision_review", {})
+        if anime_visual_cfg.get("enabled", False):
+            from backend.anime_vision import AnimeVisualReviewer
+            anime_visual_reviewer = AnimeVisualReviewer(
+                llm_model,
+                max_side=int(anime_visual_cfg.get("max_side", 1280)),
+            )
         if features.get("scene_concepts_enabled", False):
             from backend.scene_concepts import SceneConceptScorer
             scene_cfg = cfg.get("scene_concepts", {})
@@ -112,9 +148,8 @@ def main():
 
     service = ReviewService(
         llm_model=llm_model, engine=engine, ocr_client=ocr_client,
+        text_detector=text_detector,
         log_dir=os.path.join(_REPO_ROOT, cfg["log_dir"]),
-        max_rounds=cfg["agent"].get("max_rounds", 5),
-        on_tool_fail=cfg["agent"].get("on_tool_fail", "skip"),
         mock_mode=mode == "mock",
         ocr_enabled=features.get("ocr_enabled", True),
         lowlevel_enabled=features.get("lowlevel_enabled", True),
@@ -128,6 +163,16 @@ def main():
         ),
         scene_options=scene_options,
         explanation_enabled=features.get("llm_explanation_enabled", True),
+        anime_visual_reviewer=anime_visual_reviewer,
+        anime_visual_enabled=(
+            mode == "real"
+            and cfg.get("anime_vision_review", {}).get("enabled", False)
+        ),
+        anime_visual_min_style_score=float(
+            cfg.get("anime_vision_review", {}).get(
+                "min_style_score", 0.90
+            )
+        ),
         save_images=cfg.get("audit", {}).get("save_images", True))
 
     init_service(service, max_image_mb=cfg["server"].get("max_image_mb", 10))

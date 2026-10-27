@@ -6,7 +6,7 @@
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/health` | 检查后端、Agent 与视觉模型是否已初始化 |
+| `GET` | `/health` | 检查固定工作流与视觉模型是否已初始化 |
 | `POST` | `/api/review` | 上传单张图片并取得审核建议 |
 
 默认服务地址为 `http://localhost:8000`。若启动时设置了 `BACKEND_PORT`，端口以环境变量为准。
@@ -48,7 +48,7 @@ HTTP 200，固定只有两个字段：
 正常建议以程序生成的“审核结果；处置”开头，后面的解释由 LLM 基于完整
 `decision_evidence` 生成。LLM 不能改变处置；解释失败或出现其他动作时，服务自动返回确定性模板。
 
-当前业务降级也返回 HTTP 200 和 `{id, suggestion}`。例如 DeepSeek/Agent 异常时：
+当前业务降级也返回 HTTP 200 和 `{id, suggestion}`。例如 DeepSeek 或固定流程异常时：
 
 ```json
 {
@@ -100,7 +100,7 @@ HTTP 200 示例：
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `status` | string | `ok` 或 `not_ready` |
-| `service_ready` | boolean | Agent 服务是否已经构建 |
+| `service_ready` | boolean | 固定审核工作流是否已经构建 |
 | `model_loaded` | boolean | 真实视觉模型或 Mock Engine 是否可用 |
 | `mock` | boolean | `true` 表示模拟模式，`false` 表示真实视觉引擎 |
 
@@ -115,7 +115,7 @@ LLM/OCR 连通性；`mock=false` 只表示使用真实 FG-CLIP2 引擎。当前�
 
 - DeepSeek 单次请求超时：60 秒；
 - 阿里云 OCR 单次请求超时：60 秒；
-- Agent 最大轮次：5；
+- 固定工作流没有 LLM 轮次上限，按条件顺序执行；
 - 后端没有整个 `/api/review` 请求级总超时；
 - 后端没有实现专用 HTTP 504 响应。
 
@@ -164,12 +164,13 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 
 ## 6. 当前内部保证
 
-- `analyze_image`（FG-CLIP2）必须成功调用；Agent 提前提交会被调用守卫拒绝。
-- `analyze_image` 会执行轻量低层文字探测；完整低层分析可再由 Agent 调用。
-- `ocr_image` 在文字扭曲、疑似文字或文字探测失败时由程序自动触发。
+- `analyze_image`（FG-CLIP2）必须成功执行。
+- `detect_text` 在 CLIP 后执行；高置信 L0 也不能跳过文字检测。
+- `ocr_image` 仅在文字检测命中或检测失败时执行，quality 不再单独触发 OCR。
 - OCR 只返回文字、坐标和置信度证据，不承担图片语义裁决。
-- RAG 默认启用；取得 CLIP 证据后，Agent 可按需调用 `search_knowledge` 检索本地规则与案例。可通过 `features.rag_enabled=false` 关闭。
+- RAG 默认启用；OCR 成功取得文本后检索本地规则与案例。可通过 `features.rag_enabled=false` 关闭。
 - LLM 不接收原始图片，只接收工具生成的文字证据。
+- 例外：高置信动漫路由且初步动作非放行时，可调用结构化视觉复核；真实域不调用。
 - 同一请求重复调用 CLIP 使用请求级缓存，不重复执行 GPU 推理。
 - 真实模式配置为 `lora=true`、`require_checkpoint=true`，必须加载训练后的 LoRA 和分类头；Mock 模式只用于流程演示。
 
@@ -178,11 +179,11 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 截至当前版本：
 
 - 真实 FG-CLIP2 原始权重可在 RTX 5060 Ti/CUDA 环境加载并推理；
-- DeepSeek-V4-Flash 能完成工具调用，并在程序锁定动作后生成最终解释；
-- 一次真实链路为 `analyze_image → 自动 OCR / 场景概念 → finalize_review → LLM 解释`；
+- DeepSeek-V4-Flash 在程序锁定动作后生成最终解释；
+- 一次真实链路为 `analyze_image → detect_text → OCR/RAG → 场景概念 → 策略 → LLM 解释`；
 - 阿里云高精版 OCR 的真实请求已成功；
 - RAG 已接入本地规则库，检索分数不是违规概率；最终处置沿用程序规则；
-- 自动化测试 138 项通过，覆盖策略、OCR、RAG、场景概念、完整证据和解释回退；
+- 自动化测试 177 项通过，覆盖固定流程、grounded 文字语义、动漫路由、视觉复核、策略、OCR、RAG 和解释回退；
 - 上述后端内部变化没有修改前端请求字段和响应结构。
 
 ## 8. 前端联调检查表

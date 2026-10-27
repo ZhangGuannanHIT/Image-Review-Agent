@@ -71,6 +71,12 @@ def main():
         quality_thresholds=config.get("quality_thresholds"),
         binary_injury_dir=_resolve(config.get("binary_injury_dir", "")),
         quality_fusion_dir=_resolve(config.get("quality_fusion_dir", "")),
+        anime_style_router_dir=_resolve(
+            config.get("anime_style_router_dir", "")
+        ),
+        anime_style_min_score=float(
+            config.get("anime_style_min_score", 0.90)
+        ),
         strict_load=config.get("strict_load", False),
     )
 

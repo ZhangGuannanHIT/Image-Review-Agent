@@ -1,0 +1,47 @@
+{
+  "embedding_dim": 768,
+  "hidden_dim": 128,
+  "threshold": 0.01,
+  "metrics": {
+    "train": {
+      "n": 181,
+      "threshold": 0.01,
+      "tp": 71,
+      "tn": 110,
+      "fp": 0,
+      "fn": 0,
+      "anime_recall": 1.0,
+      "real_false_positive_rate": 0.0
+    },
+    "val": {
+      "n": 63,
+      "threshold": 0.01,
+      "tp": 31,
+      "tn": 32,
+      "fp": 0,
+      "fn": 0,
+      "anime_recall": 1.0,
+      "real_false_positive_rate": 0.0
+    },
+    "test": {
+      "n": 36,
+      "threshold": 0.01,
+      "tp": 18,
+      "tn": 18,
+      "fp": 0,
+      "fn": 0,
+      "anime_recall": 1.0,
+      "real_false_positive_rate": 0.0
+    }
+  },
+  "source_counts": {
+    "anime": 120,
+    "real_solid": 100,
+    "real_quality": 60
+  },
+  "split_counts": {
+    "test": 36,
+    "train": 181,
+    "val": 63
+  }
+}

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""审核服务：建立请求上下文、运行带调用守卫的 Agent、记录轨迹。"""
+"""审核服务：建立请求上下文、运行固定证据流程并记录审计轨迹。"""
 
 from __future__ import annotations
 
@@ -16,20 +16,19 @@ from pathlib import Path
 from PIL import Image
 from typing import Any
 
-from langchain_core.messages import HumanMessage
-
 from . import tools as tools_mod
-from .agent import build_agent
 from .explanation import compose_final_suggestion, generate_final_explanation
-from .parser import extract_suggestion
-from .prompts import build_system_prompt
 from .schemas import ReviewResponse
 from .policy import DecisionPolicy, decide
 from . import rag as rag_mod
 from .text_evidence import (
     assess_text_evidence, build_decision_evidence, collect_knowledge_hits,
 )
+from .text_detection import LightweightTextDetector
+from .text_semantic import TextSemanticReviewer
+from .anime_vision_policy import anime_visual_gate, reconcile_anime_visual
 from .vision import VisionGate
+from .workflow import FixedReviewWorkflow
 
 
 class ReviewService:
@@ -38,10 +37,9 @@ class ReviewService:
         llm_model: Any,
         engine: Any,
         ocr_client: Any = None,
+        text_detector: Any = None,
         retriever: Any = None,
         log_dir: str = "logs",
-        max_rounds: int = 5,
-        on_tool_fail: str = "skip",
         mock_mode: bool = False,
         ocr_enabled: bool = True,
         lowlevel_enabled: bool = True,
@@ -54,15 +52,29 @@ class ReviewService:
         scene_concepts_enabled: bool = False,
         scene_options: dict | None = None,
         explanation_enabled: bool = True,
+        text_semantic_reviewer: Any = None,
+        anime_visual_reviewer: Any = None,
+        anime_visual_enabled: bool = False,
+        anime_visual_min_style_score: float = 0.90,
     ):
         self.llm_model = llm_model
         self.engine = engine
         self.ocr_client = ocr_client
+        self.text_detector = text_detector or LightweightTextDetector()
         self.policy = DecisionPolicy(**(decision_policy or {}))
+        self.rag_enabled = rag_enabled
+        self.retriever = retriever or rag_mod.retrieve
+        self.text_semantic_reviewer = (
+            text_semantic_reviewer or TextSemanticReviewer(llm_model)
+        )
+        self.anime_visual_reviewer = anime_visual_reviewer
+        self.anime_visual_enabled = bool(anime_visual_enabled)
+        self.anime_visual_min_style_score = float(anime_visual_min_style_score)
         self.tools = tools_mod.build_tools(
             engine,
             ocr_client,
             retriever,
+            text_detector=self.text_detector,
             enable_ocr=ocr_enabled,
             enable_lowlevel=lowlevel_enabled,
             enable_rag=rag_enabled,
@@ -71,25 +83,24 @@ class ReviewService:
             scene_scorer=scene_scorer,
             scene_options=scene_options,
         )
-        self.agent = build_agent(
-            llm_model,
+        self.workflow = FixedReviewWorkflow(
             self.tools,
-            system_prompt=build_system_prompt(
-                rag_enabled=rag_enabled,
-                scene_concepts_enabled=scene_concepts_enabled,
-            ),
-            max_rounds=max_rounds,
-            on_tool_fail=on_tool_fail,
+            ocr_enabled=ocr_enabled,
+            scene_concepts_enabled=scene_concepts_enabled,
+            rag_enabled=rag_enabled,
+            retriever=self.retriever,
+            text_semantic_reviewer=self.text_semantic_reviewer,
         )
         self.log_dir = log_dir
-        self.max_rounds = max_rounds
         self.mock_mode = mock_mode
-        self.rag_enabled = rag_enabled
-        self.retriever = retriever or rag_mod.retrieve
         self.explanation_enabled = explanation_enabled
         self.save_images = save_images
         self.model_identity = {"checkpoint": str(getattr(engine, "ckpt_dir", "")),
                                "trained": bool(getattr(engine, "trained", False)),
+                               "anime_style_router_loaded": bool(
+                                   getattr(engine, "anime_style_router", None)
+                                   is not None
+                               ),
                                "type_thresholds": getattr(engine, "type_thresholds", {}),
                                "quality_thresholds": getattr(engine, "quality_thresholds", {})}
         checkpoint = self.model_identity["checkpoint"]
@@ -99,11 +110,20 @@ class ReviewService:
                 for name in ("head.pt", "adapter_model.safetensors", "labels.json")
                 if (Path(checkpoint) / name).is_file()
             }
+        style_router_dir = getattr(engine, "anime_style_router_dir", "")
+        if isinstance(style_router_dir, (str, os.PathLike)) and style_router_dir:
+            self.model_identity["anime_style_router_sha256"] = {
+                name: hashlib.sha256(
+                    (Path(style_router_dir) / name).read_bytes()
+                ).hexdigest()
+                for name in ("router.pt", "metadata.json")
+                if (Path(style_router_dir) / name).is_file()
+            }
         os.makedirs(log_dir, exist_ok=True)
 
     @property
     def ready(self) -> bool:
-        return self.agent is not None and self.engine is not None
+        return self.workflow is not None and self.engine is not None
 
     @staticmethod
     def _redact_text(text: str) -> str:
@@ -134,10 +154,16 @@ class ReviewService:
                 "request_id": ocr.get("request_id", ""),
                 "error": ocr.get("error"),
             }
-
-        final_suggestion = sanitized.get("finalize_review")
-        if isinstance(final_suggestion, str):
-            sanitized["finalize_review"] = ReviewService._redact_text(final_suggestion)
+        detection = sanitized.get("detect_text")
+        if isinstance(detection, dict):
+            sanitized["detect_text"] = {
+                "status": detection.get("status"),
+                "has_text": bool(detection.get("has_text")),
+                "box_count": int(detection.get("box_count", 0) or 0),
+                "confidence": detection.get("confidence"),
+                "method": detection.get("method", ""),
+                "error": detection.get("error"),
+            }
 
         searches = sanitized.get("search_knowledge")
         if isinstance(searches, dict):
@@ -160,7 +186,7 @@ class ReviewService:
         record = dict(record)
         if "filename" in record:
             record.update(self._file_log_fields(record.pop("filename")))
-        for field in ("suggestion", "agent_suggestion"):
+        for field in ("suggestion",):
             if field in record:
                 record[field] = self._redact_text(record[field])
         final_explanation = record.get("final_explanation")
@@ -171,6 +197,16 @@ class ReviewService:
                     final_explanation["explanation"]
                 )
             record["final_explanation"] = final_explanation
+        detection = record.get("text_detection")
+        if isinstance(detection, dict):
+            record["text_detection"] = {
+                "status": detection.get("status"),
+                "has_text": bool(detection.get("has_text")),
+                "box_count": int(detection.get("box_count", 0) or 0),
+                "confidence": detection.get("confidence"),
+                "method": detection.get("method", ""),
+                "error": detection.get("error"),
+            }
         if "tool_results" in record:
             record["tool_results"] = self._sanitize_tool_results(record["tool_results"])
         # Raw messages and tool arguments can repeat OCR text and search queries.
@@ -193,12 +229,15 @@ class ReviewService:
         if "analyze_image" not in context.cache:
             return None
         evidence = dict(context.cache["analyze_image"])
+        evidence["text_detection"] = context.cache.get(
+            "text_detection", {"status": "not_available", "has_text": False}
+        )
         lowlevel = context.cache.get("analyze_lowlevel")
         if isinstance(lowlevel, dict):
             evidence["lowlevel"] = {
                 "status": "ok",
                 "source": context.cache.get(
-                    "analyze_lowlevel_source", "agent_tool"
+                    "analyze_lowlevel_source", "workflow_tool"
                 ),
                 "features": lowlevel,
                 "text_probe_ok": bool(
@@ -221,10 +260,12 @@ class ReviewService:
                     context.cache.get("text_suspected", False)
                 ),
             }
-        text_assessment = assess_text_evidence(
-            context.cache.get("ocr_image"),
-            self.retriever if self.rag_enabled else None,
-        )
+        text_assessment = context.cache.get("text_evidence")
+        if not isinstance(text_assessment, dict):
+            text_assessment = assess_text_evidence(
+                context.cache.get("ocr_image"),
+                self.retriever if self.rag_enabled else None,
+            )
         evidence["text_evidence"] = text_assessment
         knowledge_hits = collect_knowledge_hits(context.cache)
         evidence["search_knowledge"] = knowledge_hits
@@ -234,6 +275,20 @@ class ReviewService:
 
         decision_evidence = build_decision_evidence(evidence)
         decision = decide(evidence, self.policy, context.cache.get("review_blood"))
+        visual_gate = anime_visual_gate(
+            decision,
+            evidence,
+            min_style_score=self.anime_visual_min_style_score,
+        )
+        log["anime_visual_gate"] = visual_gate
+        if (
+            self.anime_visual_enabled
+            and self.anime_visual_reviewer is not None
+            and visual_gate["eligible"]
+        ):
+            review = self.anime_visual_reviewer.review(context.image)
+            decision = reconcile_anime_visual(decision, evidence, review)
+            log["anime_visual_review"] = review
         if self.explanation_enabled:
             explanation_result = generate_final_explanation(
                 self.llm_model, decision_evidence, decision
@@ -247,6 +302,7 @@ class ReviewService:
 
         log["decision_evidence"] = decision_evidence
         log["decision"] = decision
+        log["text_detection"] = evidence["text_detection"]
         log["text_evidence"] = text_assessment
         log["search_knowledge_hits"] = knowledge_hits
         log["final_explanation"] = explanation_result
@@ -281,38 +337,15 @@ class ReviewService:
                 image_path = image_dir / f"{request_id}{extension}"
                 image_path.write_bytes(image_bytes)
                 log["image_path"] = str(image_path.resolve())
-            result = self.agent.invoke(
-                {
-                    "messages": [HumanMessage(content="请审核当前图片。")],
-                    "remaining_steps": self.max_rounds * 2 + 2,
-                    "filename": filename,
-                    "tool_results": {},
-                    "steps": [],
-                    "suggestion": "",
-                    "rounds": 0,
-                    "clip_called": False,
-                    "clip_succeeded": False,
-                    "finalized": False,
-                    "degraded": False,
-                    "error": "",
-                },
-                config={"recursion_limit": self.max_rounds * 4 + 10},
-            )
-            suggestion = extract_suggestion(result)
+            result = self.workflow.run()
             context = tools_mod.get_request_context()
-            log["agent_suggestion"] = suggestion
             if result.get("clip_succeeded"):
                 policy_suggestion = self._finalize_policy_decision(context, log)
-                if policy_suggestion:
-                    suggestion = policy_suggestion
-            log["evidence_text"] = context.cache.get("analyze_image_text", "")
-            log["messages"] = [
-                {"type": message.type, "name": getattr(message, "name", None),
-                 "content": message.content,
-                 "tool_calls": getattr(message, "tool_calls", [])}
-                for message in result.get("messages", [])
-            ]
+                suggestion = policy_suggestion or "未能生成审核建议，请稍后重试。"
+            else:
+                suggestion = "未能取得 CLIP 视觉证据，无法完成图片审核，请稍后重试。"
             log.update({
+                "workflow_version": result.get("workflow_version"),
                 "clip_called": result.get("clip_called", False),
                 "clip_succeeded": result.get("clip_succeeded", False),
                 "finalized": result.get("finalized", False),

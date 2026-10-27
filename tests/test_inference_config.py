@@ -38,8 +38,24 @@ class InferenceConfigTests(unittest.TestCase):
         config = load_inference_config()
         self.assertTrue(config["model_path"])
         self.assertIn("ckpt_dir", config)
+        self.assertEqual(
+            config.get("anime_style_router_dir"),
+            "checkpoints/anime_style_router",
+        )
+        self.assertEqual(float(config.get("anime_style_min_score")), 0.90)
         self.assertIn("device", config)
         self.assertIn("lora", config)
+
+    def test_backend_anime_visual_gate_is_explicit(self):
+        import yaml
+        backend = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "backend/config.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        review = backend["anime_vision_review"]
+        self.assertTrue(review["enabled"])
+        self.assertEqual(float(review["min_style_score"]), 0.90)
 
     def test_missing_file_falls_back_to_defaults(self):
         self.assertEqual(load_inference_config("config/does-not-exist.yaml"), {})

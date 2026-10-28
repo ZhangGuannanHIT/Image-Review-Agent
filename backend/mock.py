@@ -48,7 +48,9 @@ class RuleBasedMockChatModel:
     def invoke(self, messages):
         return AIMessage(
             content=(
-                '{"explanation":"视觉候选与辅助证据已完成核对，'
-                '当前结论由程序处置规则生成。"}'
+                '{"summary":"视觉候选与辅助证据已完成核对，'
+                '当前结论由程序规则生成。",'
+                '"evidence_note":"模型证据与程序处置方向一致。",'
+                '"limitation":""}'
             )
         )

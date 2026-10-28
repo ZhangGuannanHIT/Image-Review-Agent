@@ -6,7 +6,11 @@ import unittest
 
 from pydantic import ValidationError
 
-from backend.anime_vision import AnimeVisualEvidence, AnimeVisualReviewer
+from backend.anime_vision import (
+    AnimeVisualEvidence,
+    AnimeVisualReviewer,
+    parse_visual_review,
+)
 from backend.anime_vision_policy import anime_visual_gate, reconcile_anime_visual
 from src.labels import RISK_CLASSES
 
@@ -23,9 +27,16 @@ def decision(action="limit"):
     }
 
 
-def evidence(score=0.99, grounded=False, high_rule=False, verdict="safe"):
+def evidence(
+    score=0.99,
+    grounded=False,
+    high_rule=False,
+    verdict="safe",
+    quality=None,
+):
     return {
         "anime_style": {"score": score, "is_anime": score >= 0.9},
+        "quality": {"labels": quality or ["清晰"]},
         "text_evidence": {
             "grounded_violation": grounded,
             "high_risk_rule_ids": ["R006"] if high_rule else [],
@@ -71,6 +82,42 @@ class AnimeVisionTests(unittest.TestCase):
         )
         self.assertFalse(result["eligible"])
         self.assertIn("text_grounding_unresolved", result["reason"])
+
+    def test_allow_safety_gate_uses_elevated_risk_quality_or_binary(self):
+        elevated = anime_visual_gate(
+            decision("allow"),
+            evidence(),
+            allow_safety_review=True,
+        )
+        self.assertTrue(elevated["eligible"])
+        self.assertIn("elevated_risk_on_allow", elevated["safety_signals"])
+
+        quality = anime_visual_gate(
+            decision("allow"),
+            evidence(quality=["严重模糊"]),
+            allow_safety_review=True,
+        )
+        self.assertTrue(quality["eligible"])
+        self.assertIn("quality_uncertainty_on_allow", quality["safety_signals"])
+
+        binary = decision("allow")
+        binary["binary_state"] = "positive"
+        binary["risk_raw"] = RISK_CLASSES[0]
+        binary_result = anime_visual_gate(
+            binary,
+            evidence(),
+            allow_safety_review=True,
+        )
+        self.assertTrue(binary_result["eligible"])
+        self.assertIn("binary_uncertainty_on_allow", binary_result["safety_signals"])
+
+        quiet = decision("allow")
+        quiet["risk_raw"] = RISK_CLASSES[0]
+        self.assertFalse(anime_visual_gate(
+            quiet,
+            evidence(),
+            allow_safety_review=True,
+        )["eligible"])
 
     def test_absent_visual_evidence_withdraws_anime_limit(self):
         result = reconcile_anime_visual(decision(), evidence(), visual())
@@ -163,6 +210,19 @@ class AnimeVisionTests(unittest.TestCase):
         self.assertEqual(result["action"], "limit")
         self.assertEqual(result["anime_visual_resolution"], "keep")
 
+    def test_supported_visual_risk_escalates_initial_allow_to_limit(self):
+        result = reconcile_anime_visual(
+            decision("allow"),
+            evidence(quality=["严重模糊"]),
+            visual(injury="moderate", attack="present"),
+        )
+        self.assertEqual(result["action"], "limit")
+        self.assertEqual(result["effective_risk"], RISK_CLASSES[2])
+        self.assertEqual(
+            result["anime_visual_effect"],
+            "visual_risk_escalated_from_allow",
+        )
+
     def test_grounded_text_cannot_be_withdrawn(self):
         result = reconcile_anime_visual(
             decision(), evidence(grounded=True), visual()
@@ -202,6 +262,32 @@ class AnimeVisionTests(unittest.TestCase):
         result = AnimeVisualReviewer(Model()).review(buffer.getvalue())
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["injury"], "absent")
+
+    def test_truncated_visual_response_is_rejected(self):
+        class Model:
+            def invoke(self, messages):
+                payload = visual()
+                payload.pop("status")
+                return SimpleNamespace(
+                    content=json.dumps(payload, ensure_ascii=False),
+                    response_metadata={"finish_reason": "length"},
+                )
+
+        from PIL import Image
+        import io
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16), "white").save(buffer, format="PNG")
+        result = AnimeVisualReviewer(Model()).review(buffer.getvalue())
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "ValueError")
+
+    def test_json_mode_control_field_is_removed(self):
+        payload = visual()
+        payload.pop("status")
+        payload["type"] = "json_object"
+        parsed = parse_visual_review(json.dumps(payload, ensure_ascii=False))
+        self.assertEqual(parsed.injury, "absent")
 
 
 if __name__ == "__main__":

@@ -46,7 +46,12 @@ class ExplanationAwareModel(RuleBasedMockChatModel):
             self.explanation_payloads.append(json.loads(str(human.content)))
             return AIMessage(
                 content=json.dumps(
-                    {"explanation": self.explanation}, ensure_ascii=False
+                    {
+                        "summary": self.explanation,
+                        "evidence_note": "视觉候选与辅助证据方向一致。",
+                        "limitation": "",
+                    },
+                    ensure_ascii=False,
                 )
             )
         return super().invoke(messages)
@@ -71,6 +76,7 @@ class FinalExplanationTests(unittest.TestCase):
         self.assertIn("风险头与血腥辅助头", response.suggestion)
         self.assertEqual(record["decision"]["action"], "block")
         self.assertEqual(record["final_explanation"]["status"], "ok")
+        self.assertEqual(record["final_explanation"]["source"], "llm_template")
         self.assertEqual(
             record["final_explanation"]["prompt_version"],
             EXPLANATION_PROMPT_VERSION,
@@ -79,14 +85,12 @@ class FinalExplanationTests(unittest.TestCase):
         self.assertEqual(len(model.explanation_payloads), 1)
         payload = model.explanation_payloads[0]
         self.assertEqual(
-            set(payload), {"decision_evidence", "program_decision"}
+            set(payload), {"fixed_template", "facts"}
         )
-        self.assertIn("model_heads", payload["decision_evidence"])
-        self.assertEqual(
-            payload["decision_evidence"]["lowlevel"]["status"], "not_called"
-        )
-        self.assertIn("text_detection", payload["decision_evidence"])
-        self.assertEqual(payload["program_decision"]["action"], "block")
+        self.assertIn("summary", payload["fixed_template"])
+        self.assertEqual(payload["facts"]["action_label"], "下架")
+        self.assertEqual(payload["facts"]["effective_risk"], "L3_严重违规")
+        self.assertNotIn("decision_evidence", payload)
 
     def test_explanation_cannot_emit_another_action_and_falls_back(self):
         model = ExplanationAwareModel(
@@ -108,6 +112,10 @@ class FinalExplanationTests(unittest.TestCase):
             record["final_explanation"]["reason"], "action_word_forbidden"
         )
         self.assertEqual(record["suggestion_source"], "deterministic_fallback")
+        self.assertEqual(
+            record["final_explanation"]["source"],
+            "program_template_fallback",
+        )
 
     def test_explanation_can_be_disabled_without_changing_policy(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -124,8 +132,47 @@ class FinalExplanationTests(unittest.TestCase):
             )
 
         self.assertIn("处置：下架", response.suggestion)
-        self.assertEqual(record["final_explanation"]["status"], "disabled")
-        self.assertEqual(record["suggestion_source"], "deterministic_fallback")
+        self.assertEqual(record["final_explanation"]["status"], "template")
+        self.assertEqual(record["final_explanation"]["source"], "program_template")
+        self.assertEqual(record["suggestion_source"], "program_template")
+        self.assertEqual(
+            record["final_explanation"]["skip_reason"],
+            "llm_disabled",
+        )
+
+    def test_selective_mode_skips_llm_for_allow_and_uses_program_template(self):
+        model = ExplanationAwareModel(
+            "视觉候选与辅助证据方向一致，当前结论由程序规则生成。"
+        )
+
+        class AllowedEngine:
+            trained = True
+
+            def predict(self, image):
+                return evidence(0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            service = ReviewService(
+                model,
+                AllowedEngine(),
+                log_dir=directory,
+                save_images=False,
+                explanation_mode="selective",
+            )
+            response = service.review(image_bytes(), "allowed.png")
+            record = json.loads(
+                (Path(directory) / "review.log.jsonl").read_text(encoding="utf-8")
+            )
+
+        self.assertIn("处置：放行", response.suggestion)
+        self.assertEqual(len(model.explanation_payloads), 0)
+        self.assertEqual(record["final_explanation"]["status"], "template")
+        self.assertEqual(
+            record["final_explanation"]["skip_reason"],
+            "program_action",
+        )
+        self.assertEqual(record["suggestion_source"], "program_template")
+        self.assertNotIn("explanation", record["timings_ms"])
 
 
 if __name__ == "__main__":

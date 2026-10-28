@@ -8,6 +8,10 @@
 |---|---|---|
 | `GET` | `/health` | 检查固定工作流与视觉模型是否已初始化 |
 | `POST` | `/api/review` | 上传单张图片并取得审核建议 |
+| `GET` | `/api/records` | 按工作区、域、动作和风险读取持久化队列 |
+| `POST` | `/api/records/{id}/feedback` | 确认或多次调整人工结果 |
+| `POST` | `/api/records/clear` | 清空指定工作区的持久化队列和审计原图 |
+| `GET` | `/api/records/export.csv` | 导出指定工作区 CSV |
 
 默认服务地址为 `http://localhost:8000`。若启动时设置了 `BACKEND_PORT`，端口以环境变量为准。
 后端默认允许 `localhost` 与 `127.0.0.1` 的任意端口跨域访问；部署到其他域名时需要扩展
@@ -25,17 +29,74 @@ Content-Type: multipart/form-data
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---:|---|
 | `image` | file | 是 | JPG、PNG 或 WEBP，默认不超过 10MB |
+| `workspace_id` | string | 否 | 工作区稳定标识，默认 `default`；仅允许字母、数字、下划线和连字符 |
 
 上传字段名必须是 `image`。服务按文件内容解码，不只依赖扩展名或浏览器提交的 MIME；使用 `FormData` 时不要手动设置 multipart boundary。
 
 ### 2.1 正常或业务降级响应
 
-HTTP 200，固定只有两个字段：
+HTTP 200 保留原有 `id`、`suggestion`，并新增由程序生成的结构化审核结果：
 
 ```json
 {
   "id": "7bb6329853124e2bb8ecb746d76d91e4",
-  "suggestion": "该图片判定为中度违规，建议人工复核。"
+  "suggestion": "审核结果：证据不确定，暂不认定违规；处置：人工复核。……",
+  "schema_version": "2026-10-27-review-v1",
+  "result": {
+    "action": "review",
+    "action_label": "人工复核",
+    "tone": "review",
+    "effective_risk": "L1_轻微违规",
+    "risk_raw": "L2_中度违规",
+    "domain": "virtual",
+    "domain_label": "虚拟（二次元 / 插画 / 游戏场景等）",
+    "domain_score": 0.98,
+    "domain_source": "style_router",
+    "confidence": 0.732,
+    "reason": "程序裁决理由",
+    "primary_reasons": ["binary 明确阴性", "文字语义证据不足"],
+    "adjustments": ["动漫风格导致的风险假冲突已解除"],
+    "conflict_type": "pseudo_binary_conflict",
+    "uncertain": true,
+    "policy_version": "2026-10-26-effective-v5",
+    "suggestion_source": "llm_explanation",
+    "degraded": false,
+    "recommended_action": "limit",
+    "recommended_action_label": "建议限流",
+    "review_hint": true,
+    "review_reason": "存在非轻度风险候选，建议人工确认前先采取限流措施"
+  },
+  "groups": [
+    {
+      "id": "basic_heads",
+      "label": "CLIP 基础头",
+      "description": "风险、类型、伤害与质量。",
+      "tools": [
+        {
+          "id": "risk_head",
+          "label": "风险等级头",
+          "status": "ok",
+          "status_label": "已完成",
+          "outcome": "risk",
+          "outcome_label": "发现风险",
+          "summary": "原始候选 L2，置信度 0.732",
+          "duration_ms": null,
+          "details": {"scores": {"L2_中度违规": 0.732}}
+        }
+      ]
+    }
+  ],
+  "timing": {
+    "total_ms": 8420,
+    "stages": [
+      {
+        "id": "analyze_image",
+        "label": "FG-CLIP2 视觉推理",
+        "category": "model",
+        "duration_ms": 680
+      }
+    ]
+  }
 }
 ```
 
@@ -43,21 +104,40 @@ HTTP 200，固定只有两个字段：
 |---|---|---|
 | `id` | string | 本次审核编号，用于查询后端日志 |
 | `suggestion` | string | 面向运营的正常建议或降级说明 |
+| `schema_version` | string | 结构化响应版本 |
+| `result` | object | 动作、有效风险、原始风险、域和核心理由 |
+| `groups` | array | 四组工具证据：基础头、专项模型、文字规则、分支裁决 |
+| `timing` | object | 后端总耗时和分阶段毫秒耗时 |
 
-违规等级、置信度、OCR、低层特征、工具轨迹和 `trained` 状态不返回前端，只写入后端日志。
-正常建议以程序生成的“审核结果；处置”开头，后面的解释由 LLM 基于完整
-`decision_evidence` 生成。LLM 不能改变处置；解释失败或出现其他动作时，服务自动返回确定性模板。
+`action=review` 表示最终仍需人工确认，但 `recommended_action` 可给出
+`limit`、`block` 等可执行建议，前端以“复核建议”单独展示。建议动作不会替代人工复核状态。
 
-当前业务降级也返回 HTTP 200 和 `{id, suggestion}`。例如 DeepSeek 或固定流程异常时：
+每个工具同时提供两个维度：
 
-```json
+- `status`：`ok`、`detected`、`empty`、`skipped`、`failed`、`uncertain` 等执行状态；
+- `outcome`：`safe`、`risk`、`mixed`、`neutral`、`unknown` 等证据结论。
+
+详细分数、阈值、场景候选和门控原因位于工具 `details`。OCR 原文预览经过长度限制和手机号、
+身份证号脱敏；绝对图片路径、内部消息、API 密钥和模型提示词不返回。
+
+程序动作仍是唯一权威结论。默认 `selective` 模式下，放行和限流直接使用程序模板；
+人工复核和下架才调用 LLM 填充固定的 `summary/evidence_note/limitation` 字段。
+LLM 失败时自动回退程序模板，不修改 `result.action`。`suggestion_source` 取值为
+`program_template`、`llm_explanation` 或 `deterministic_fallback`。
+
+当前业务降级也返回同样结构。CLIP 失败时 `action=unavailable`，工具状态会明确标出哪些
+步骤未执行。以下只展示关键字段：
+
+```text
 {
   "id": "7bb6329853124e2bb8ecb746d76d91e4",
-  "suggestion": "审核流程暂不可用，无法完成本次审核，请稍后重试。"
+  "suggestion": "审核流程暂不可用，无法完成本次审核，请稍后重试。",
+  "schema_version": "2026-10-27-review-v1",
+  "result": {"action": "unavailable", "action_label": "流程不可用", ...},
+  "groups": [{"id": "basic_heads", "tools": [...]}, ...],
+  "timing": {"total_ms": 120, "stages": []}
 }
 ```
-
-目前没有 `degraded` 响应字段，降级说明包含在 `suggestion` 中。前端不得假设所有 HTTP 200 都代表模型成功完成正式裁决。
 
 ### 2.2 HTTP 错误响应
 
@@ -140,7 +220,7 @@ async function reviewImage(file, timeoutMs = 120_000) {
     if (!response.ok) {
       throw new Error(body.message || '审核失败');
     }
-    return body; // { id, suggestion }
+    return body; // id、suggestion、result、groups、timing
   } finally {
     clearTimeout(timer);
   }
@@ -189,7 +269,9 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 ## 8. 前端联调检查表
 
 - 上传字段固定为 `image`；
-- 正常和降级的 200 响应读取 `id`、`suggestion`；
+- 正常和降级的 200 响应保留 `id`、`suggestion`，并读取 `result`、`groups`、`timing`；
+- 工具表必须分别展示执行 `status` 与证据 `outcome`，不能把二者合并成单一状态；
+- 缺失结构化字段时前端回退到 `suggestion`，不能误判为成功结构化审核；
 - 非 200 响应读取 `code`、`message`、`id`；
 - loading 和客户端超时分别处理；
 - 请求超时暂设为 120 秒；

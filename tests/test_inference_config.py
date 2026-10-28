@@ -56,6 +56,24 @@ class InferenceConfigTests(unittest.TestCase):
         review = backend["anime_vision_review"]
         self.assertTrue(review["enabled"])
         self.assertEqual(float(review["min_style_score"]), 0.90)
+        self.assertTrue(review["allow_safety_review"])
+        self.assertGreaterEqual(int(review["max_tokens"]), 300)
+        self.assertLessEqual(int(review["max_tokens"]), 512)
+        self.assertEqual(int(review["max_retries"]), 1)
+        self.assertTrue(review["json_response"])
+
+    def test_backend_explanation_uses_selective_fixed_template(self):
+        backend = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "backend/config.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        features = backend["features"]
+        self.assertEqual(features["llm_explanation_mode"], "selective")
+        self.assertEqual(
+            features["llm_explanation_actions"],
+            ["review", "block"],
+        )
 
     def test_missing_file_falls_back_to_defaults(self):
         self.assertEqual(load_inference_config("config/does-not-exist.yaml"), {})

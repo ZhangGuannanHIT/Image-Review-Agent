@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 import re
+import time
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
@@ -66,6 +67,10 @@ def aggregate(rows: list[dict]) -> dict:
                 row["character_recall"] for row in successful
                 if row["character_recall"] is not None
             ]
+            elapsed = [
+                row["elapsed_ms"] for row in group
+                if row.get("elapsed_ms") is not None
+            ]
             output[f"{category}:{label}"] = {
                 "count": len(group),
                 "success": len(successful),
@@ -73,6 +78,7 @@ def aggregate(rows: list[dict]) -> dict:
                 "readable": sum(bool(row["readable"]) for row in successful),
                 "mean_confidence": float(mean(confidences)) if confidences else None,
                 "mean_character_recall": float(mean(recalls)) if recalls else None,
+                "mean_elapsed_ms": float(mean(elapsed)) if elapsed else None,
             }
     return output
 
@@ -105,7 +111,9 @@ def main() -> None:
         if calls >= args.max_calls:
             break
         image_path = Path(args.image_root) / row["file"]
+        started = time.monotonic()
         result = client.recognize(image_path.read_bytes())
+        elapsed_ms = round((time.monotonic() - started) * 1000)
         text = " ".join(result.get("texts", []) or [])
         confidence = result.get("mean_confidence")
         char_count = len(normalize_text(text))
@@ -132,6 +140,7 @@ def main() -> None:
             ),
             "character_recall": character_recall(row["original_text"], text),
             "request_id": result.get("request_id", ""),
+            "elapsed_ms": elapsed_ms,
         }
         calls += 1
         print(

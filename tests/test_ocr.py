@@ -9,7 +9,12 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from backend.ocr import AliyunOCRConfig, GLMOCRConfig, OCRClient
+from backend.ocr import (
+    AliyunOCRConfig,
+    GLMOCRConfig,
+    LocalGLMOCRConfig,
+    OCRClient,
+)
 
 
 def png_bytes() -> bytes:
@@ -33,6 +38,57 @@ class GLMOCRTests(unittest.TestCase):
             )
             client = OCRClient.from_config(path)
             self.assertEqual(client.config.provider, "glm_ocr")
+
+    def test_local_config_precedes_cloud_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ocr.yaml"
+            path.write_text(
+                "local_glm_ocr:\n"
+                "  provider: local_glm_ocr\n"
+                "  endpoint: http://127.0.0.1:5002/glmocr/parse\n"
+                "aliyun_market_ocr:\n"
+                "  provider: aliyun_market_ocr\n"
+                "  appcode: ignored\n",
+                encoding="utf-8",
+            )
+            client = OCRClient.from_config(path)
+        self.assertEqual(client.config.provider, "local_glm_ocr")
+        self.assertTrue(client.available())
+
+    @patch("backend.ocr.requests.post")
+    def test_local_server_request_and_response(self, post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "id": "chatcmpl-local-1",
+            "choices": [{
+                "message": {"content": "本地文字"},
+            }],
+        }
+        post.return_value = response
+        client = OCRClient(
+            LocalGLMOCRConfig(
+                endpoint="http://127.0.0.1:8080/v1/chat/completions",
+                max_side=800,
+            )
+        )
+        result = client.recognize(png_bytes())
+        self.assertTrue(result["success"])
+        self.assertEqual(result["texts"], ["本地文字"])
+        self.assertEqual(result["request_id"], "chatcmpl-local-1")
+        kwargs = post.call_args.kwargs
+        body = kwargs["json"]
+        content = body["messages"][0]["content"]
+        self.assertEqual(
+            content[1]["image_url"]["url"].split(",", 1)[0],
+            "data:image/jpeg;base64",
+        )
+        self.assertEqual(content[0]["text"], "Text Recognition:")
+        self.assertEqual(body["model"], "glm-ocr")
+        self.assertEqual(
+            post.call_args.args[0],
+            "http://127.0.0.1:8080/v1/chat/completions",
+        )
 
     def test_not_configured_is_not_no_text(self):
         result = OCRClient(GLMOCRConfig(api_key="")).recognize(png_bytes())

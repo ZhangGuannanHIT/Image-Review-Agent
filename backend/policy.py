@@ -282,7 +282,7 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
                 conflict_type = "pseudo_binary_conflict"
                 reason = "binary 明确阴性；风险/后果展示矛盾缺少独立内容支持，按有效风险降级"
                 if anime_relaxation:
-                    adjustments.append("动漫/插画域 Prompt 命中，解除风格与血腥的假冲突")
+                    adjustments.append("虚拟/插画域 Prompt 命中，解除风格与血腥的假冲突")
                 if real_l1_relaxation:
                     adjustments.append("真实域仅对低置信 L1 解除假冲突")
                 if quality_relaxation:
@@ -428,8 +428,8 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
         action, uncertain = "limit", False
         review_level = RISK_CLASSES[1]
         conflict_type = "anime_severe_style_cap"
-        reason = "二次元虚构语境与高风险候选冲突，但仅见轻微 injury 且无直接攻击或明确威胁；按轻度限流处理"
-        adjustments.append("动漫风格夸张导致严重风险候选缺少关系证据，降为 L1 限流")
+        reason = "虚拟虚构语境与高风险候选冲突，但仅见轻微 injury 且无直接攻击或明确威胁；按轻度限流处理"
+        adjustments.append("虚拟风格夸张导致严重风险候选缺少关系证据，降为 L1 限流")
     if (
         risk == RISK_CLASSES[1]
         and anime_matched
@@ -448,6 +448,30 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
         reason += "；证据存在高不确定性，进入人工复核"
     if binary_reason:
         reason += f"；{binary_reason}"
+
+    recommended_action = action
+    review_reason = ""
+    if action == "review":
+        recommended_action = "review"
+        if (
+            risk == RISK_CLASSES[3]
+            and (
+                binary_state == "positive"
+                or has_direct_violence
+                or injury == INJURY_CLASSES[3]
+            )
+        ):
+            recommended_action = "block"
+            review_reason = "严重等级候选与独立伤害或攻击证据并存，建议人工确认时优先按高风险处理"
+        elif (
+            risk in RISK_CLASSES[1:4]
+            or binary_state == "positive"
+            or has_independent_violence
+        ):
+            recommended_action = "limit"
+            review_reason = "存在非轻度风险候选，建议人工确认前先采取限流措施"
+        else:
+            review_reason = "当前证据不足以形成可执行的自动处置建议，需要人工补充判断"
     effective_risk = review_level or risk or "无有效预测"
     if action == "allow":
         effective_risk = RISK_CLASSES[0]
@@ -462,6 +486,15 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
             "category": category or "无达到处置门槛的违规类别", "reason": reason,
             "adjustments": adjustments,
             "binary_state": binary_state,
+            "recommended_action": recommended_action,
+            "recommended_action_label": {
+                "allow": "建议放行",
+                "limit": "建议限流",
+                "review": "建议人工判断",
+                "block": "建议下架",
+            }.get(recommended_action, recommended_action),
+            "review_hint": bool(review_reason),
+            "review_reason": review_reason,
             "risk_candidate": {"label": risk, "score": risk_rank[0][0] if risk_rank else None},
             "effective_risk_candidate": {
                 "label": effective_risk,
@@ -576,8 +609,15 @@ def render(decision: dict) -> str:
             str(item.get("id")) for item in knowledge[:5] if item.get("id")
         ) + "。"
     domain = (scene.get("domain") or {}).get("effective")
-    domain_text = "；域：二次元/插画" if domain == "anime_illustration" else ""
+    domain_text = "；域：虚拟（二次元/插画/游戏场景等）" if domain == "anime_illustration" else ""
+    review_hint_text = ""
+    if action == "人工复核" and decision.get("review_reason"):
+        review_hint_text = (
+            f"复核建议：{decision.get('recommended_action_label', '建议人工判断')}。"
+            f"{decision['review_reason']}。"
+        )
     return (f"审核结果：{status}；处置：{action}。"
             f"CLIP 风险候选：{risk}；暴力类型：{types or '无命中标签'}；血腥候选：{injury}。"
             f"{effective_text}{binary_text}{quality_text}{text_text}{scene_text}"
-            f"{domain_text}{knowledge_text}{review_text}依据：{decision['reason']}。")
+            f"{domain_text}{knowledge_text}{review_text}{review_hint_text}"
+            f"依据：{decision['reason']}。")

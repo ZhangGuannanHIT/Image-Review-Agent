@@ -163,6 +163,9 @@ def main() -> None:
             min_style_score=float(
                 anime_visual_cfg.get("min_style_score", 0.90)
             ),
+            allow_safety_review=bool(
+                anime_visual_cfg.get("allow_safety_review", True)
+            ),
         )
         scene = evidence["scene_concepts"]
         output_rows.append({

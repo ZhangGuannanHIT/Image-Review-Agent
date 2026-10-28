@@ -40,6 +40,7 @@ def main():
     scene_options = None
     features = cfg.get("features", {})
     from backend.service import ReviewService
+    from backend.review_store import ReviewStore
     from backend.api import init_service
     from backend.text_detection import (
         LightweightTextDetector, RapidOCRTextDetector,
@@ -117,14 +118,21 @@ def main():
             llm_config_path = os.path.join(_REPO_ROOT, llm_config_path)
         llm_client = LLMClient.from_config(llm_config_path)
         llm_model = llm_client.build_model()
-        if cfg.get("vision_review", {}).get("enabled", False):
-            from backend.vision import DeepSeekBloodReviewer
-            vision_client = DeepSeekBloodReviewer(llm_client.config)
         anime_visual_cfg = cfg.get("anime_vision_review", {})
         if anime_visual_cfg.get("enabled", False):
             from backend.anime_vision import AnimeVisualReviewer
+            anime_visual_model = llm_client.build_model(
+                max_retries=int(anime_visual_cfg.get("max_retries", 1)),
+                max_tokens=int(anime_visual_cfg.get("max_tokens", 512)),
+                response_format=(
+                    {"type": "json_object"}
+                    if anime_visual_cfg.get("json_response", True)
+                    else None
+                ),
+                disable_thinking=True,
+            )
             anime_visual_reviewer = AnimeVisualReviewer(
-                llm_model,
+                anime_visual_model,
                 max_side=int(anime_visual_cfg.get("max_side", 1280)),
             )
         if features.get("scene_concepts_enabled", False):
@@ -156,13 +164,14 @@ def main():
         rag_enabled=features.get("rag_enabled", True),
         decision_policy=cfg.get("decision_policy"),
         vision_client=vision_client,
-        vision_gate=cfg.get("vision_review", {}).get("trigger"),
         scene_scorer=scene_scorer,
         scene_concepts_enabled=(
             mode == "real" and features.get("scene_concepts_enabled", False)
         ),
         scene_options=scene_options,
         explanation_enabled=features.get("llm_explanation_enabled", True),
+        explanation_mode=features.get("llm_explanation_mode", "selective"),
+        explanation_llm_actions=features.get("llm_explanation_actions"),
         anime_visual_reviewer=anime_visual_reviewer,
         anime_visual_enabled=(
             mode == "real"
@@ -171,6 +180,17 @@ def main():
         anime_visual_min_style_score=float(
             cfg.get("anime_vision_review", {}).get(
                 "min_style_score", 0.90
+            )
+        ),
+        anime_visual_allow_safety_review=bool(
+            cfg.get("anime_vision_review", {}).get(
+                "allow_safety_review", True
+            )
+        ),
+        record_store=ReviewStore(
+            os.path.join(
+                _REPO_ROOT,
+                cfg.get("history_db", "data/reviews.sqlite3"),
             )
         ),
         save_images=cfg.get("audit", {}).get("save_images", True))

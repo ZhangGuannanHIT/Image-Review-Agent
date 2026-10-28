@@ -27,6 +27,7 @@ from .vision import VisionGate, trigger
 class RequestToolContext:
     image: bytes
     cache: dict[str, Any] = field(default_factory=dict)
+    timings_ms: dict[str, float] = field(default_factory=dict)
 
 
 _current_request: contextvars.ContextVar[Optional[RequestToolContext]] = contextvars.ContextVar(

@@ -43,11 +43,12 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 填写两个文件中的 `api_key`：
 
-- `config/llm.yaml`：DeepSeek，用于最终解释与可选的血腥视觉复核。
-- `config/ocr.yaml`：OCR。默认接入阿里云高精版 AppCode 接口，旧的 GLM-OCR 仍兼容。
+- `config/llm.yaml`：DeepSeek，用于条件式解释、文字语义复核和虚拟视觉证据复核。
+- `config/ocr.yaml`：默认使用本地 GLM-OCR，通过 `http://127.0.0.1:8080/v1/chat/completions`
+  整图识别。阿里云和旧 GLM 云接口仅保留用于对照，不会自动回退。
 
-也可在启动终端设置 `LLM_API_KEY`、`ALIYUN_OCR_APPCODE`（旧 GLM Provider 使用
-`OCR_API_KEY`）环境变量覆盖密钥，但仍需保留上述配置文件。实际密钥文件已被 Git 忽略。
+也可在启动终端设置 `LLM_API_KEY`。云端 OCR 仅做对照时才会使用
+`ALIYUN_OCR_APPCODE`（旧 GLM Provider 使用 `OCR_API_KEY`）。实际密钥文件已被 Git 忽略。
 
 ## 4. 启动后端
 
@@ -60,6 +61,14 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 ## 5. 打开前端
 
 启动后端后，浏览器打开 <http://127.0.0.1:8000/> 即可使用审核工作台。
+结果页顶部展示程序动作、`effective_risk`、原始风险、图片域和总耗时；下方按 CLIP 基础头、
+专项模型与语境、文字与规则、分支与最终裁决四组展示工具证据，详细分数和原始 JSON 可折叠查看。
+
+左侧审核队列按工作区隔离并使用 SQLite 持久化，分为自动审查区与已完成区；
+已完成区包含通过队列和调整队列，支持按域、动作、风险筛选。
+人工可确认系统建议或按降级/升级方向多次调整最终动作，并导出当前工作区 CSV。
+“导入文件夹”会按文件名排序后串行审核。说明见
+[HUMAN_WORKFLOW_2026-10-28.md](docs/HUMAN_WORKFLOW_2026-10-28.md)。
 
 也可以独立启动前端：
 
@@ -71,20 +80,23 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 浏览器打开 <http://127.0.0.1:5500/>，或自行使用 Live Server 等 HTTP 服务启动 `frontend/`。不要直接双击 HTML，`file://` 仅提供界面预览。前端后端地址在 `frontend/config.js` 中设置，默认 `http://127.0.0.1:8000/`；后端允许本机 localhost/127.0.0.1 的 HTTP 前端跨端口访问。
 
-更换后端端口时，同时修改 `backend/config.yaml` 和 `frontend/config.js`。前端记录仅存当前页面，刷新会清空；后端原图和调用记录保存在 `backend/logs/`。
+更换后端端口时，同时修改 `backend/config.yaml` 和 `frontend/config.js`。
+工作区编号与名称保存在浏览器 localStorage，页面时间线按当前标签页会话保留；
+审核队列与人工结果保存在 `data/reviews.sqlite3`，审计原图保存在 `backend/logs/images/`。
 
 ## 可调整的运行配置
 
 - `config/inference.yaml`：已标定的暴力类型、图像质量阈值。
-- `backend/config.yaml` → `vision_review.enabled`：血腥视觉复核开关。
-- `backend/config.yaml` → `features.llm_explanation_enabled`：程序裁决后由 LLM 生成解释；关闭或解释校验失败时使用确定性模板。
+- `backend/config.yaml` → `features.llm_explanation_mode`：默认 `selective`。放行和限流使用程序固定模板；人工复核、下架才调用 LLM，并按固定 JSON 字段填写解释。
 - `backend/config.yaml` → `text_detection`：轻量文字检测参数；默认 `opencv_light`，无需模型权重。
-- `backend/config.yaml` → `anime_vision_review`：仅动漫高置信路由且动作非放行时调用视觉 LLM。
-- 复核仅在暴力类型只命中“无暴力”、血腥候选不是“无血腥”，且血腥分数低于 `0.65` 或前两名分差小于 `0.20` 时触发。每次请求最多调用一次，前端只显示复核结果。
+- `backend/config.yaml` → `anime_vision_review`：仅虚拟内容高置信路由且动作非放行时调用视觉 LLM。
 - `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
 
 阿里云 OCR 配置见 [ALIYUN_OCR.md](docs/ALIYUN_OCR.md)。AppCode 只放在本地
 `config/ocr.yaml` 或 `ALIYUN_OCR_APPCODE` 环境变量中。
+
+本地 GLM-OCR 的独立环境、模型路径、启动命令和速度对比见
+[LOCAL_GLM_OCR.md](docs/LOCAL_GLM_OCR.md)。
 
 文字扭曲 OCR 小样本结果见
 [OCR_TEXT_DISTORTION_PILOT_2026-10-22.md](docs/OCR_TEXT_DISTORTION_PILOT_2026-10-22.md)。
@@ -137,6 +149,6 @@ checkpoints/best/quality_fusion/
 
 固定流程、域策略、冻结探针和已知限制见
 [EFFECTIVE_POLICY_V5_2026-10-26.md](docs/EFFECTIVE_POLICY_V5_2026-10-26.md)。
-动漫风格路由与视觉触发见
+虚拟风格路由与视觉触发见
 [ANIME_VISION_STRATEGY_2026-10-27.md](docs/ANIME_VISION_STRATEGY_2026-10-27.md)。
 架构见 [architecture.md](docs/architecture.md)。

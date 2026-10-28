@@ -12,6 +12,7 @@ from PIL import Image
 
 from backend.api import app, init_service
 from backend.mock import MockOCRClient, MockReviewEngine, RuleBasedMockChatModel
+from backend.review_store import ReviewStore
 from backend.service import ReviewService
 from tests.test_review_policy import evidence
 
@@ -123,6 +124,10 @@ class FixedWorkflowAndAPITests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         kwargs.setdefault("text_detector", StaticDetector(False))
         kwargs.setdefault("text_semantic_reviewer", StaticSemanticReviewer())
+        kwargs.setdefault(
+            "record_store",
+            ReviewStore(Path(temporary.name) / "reviews.sqlite3"),
+        )
         service = ReviewService(
             RuleBasedMockChatModel(),
             kwargs.pop("engine", MockReviewEngine()),
@@ -182,6 +187,17 @@ class FixedWorkflowAndAPITests(unittest.TestCase):
         self.assertEqual(record["decision"]["text_evidence"]["high_risk_rule_ids"], ["R006"])
         self.assertNotIn("I WILL KILL YOU", json.dumps(record, ensure_ascii=False))
         self.assertEqual(len(record["decision"]["text_evidence"]["text_sha256"]), 64)
+        self.assertIn("workflow.total", record["timings_ms"])
+        self.assertIn("text.rag", record["timings_ms"])
+        self.assertIn("text.semantic", record["timings_ms"])
+        self.assertIn("policy.decision", record["timings_ms"])
+        self.assertNotIn("explanation", record["timings_ms"])
+        self.assertEqual(record["final_explanation"]["status"], "template")
+        self.assertEqual(
+            record["final_explanation"]["skip_reason"],
+            "program_action",
+        )
+        self.assertIn("service.total", record["timings_ms"])
 
     def test_detector_failure_runs_ocr_and_marks_degraded(self):
         ocr = CountingOCR(["ordinary text"])
@@ -298,7 +314,7 @@ class FixedWorkflowAndAPITests(unittest.TestCase):
         self.assertEqual(called, [])
 
     def test_api_contract_and_validation(self):
-        service, _ = self.make_service()
+        service, _ = self.make_service(engine=FixedEngine(evidence(0)))
         init_service(service, max_image_mb=1)
         client = TestClient(app)
         response = client.post(
@@ -306,13 +322,119 @@ class FixedWorkflowAndAPITests(unittest.TestCase):
             files={"image": ("test.png", image_bytes(), "image/png")},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(set(response.json()), {"id", "suggestion"})
+        body = response.json()
+        self.assertEqual(
+            set(body),
+            {
+                "id",
+                "suggestion",
+                "schema_version",
+                "result",
+                "groups",
+                "timing",
+            },
+        )
+        self.assertEqual(body["schema_version"], "2026-10-27-review-v1")
+        self.assertEqual(body["result"]["action"], "allow")
+        self.assertEqual(body["result"]["action_label"], "放行")
+        self.assertEqual(body["result"]["recommended_action"], "allow")
+        self.assertEqual(body["result"]["domain"], "real")
+        self.assertEqual(body["result"]["domain_label"], "真实")
+        self.assertEqual(
+            [group["id"] for group in body["groups"]],
+            [
+                "basic_heads",
+                "specialized_context",
+                "text_rules",
+                "branch_policy",
+            ],
+        )
+        tool_ids = {
+            tool["id"]
+            for group in body["groups"]
+            for tool in group["tools"]
+        }
+        self.assertIn("risk_head", tool_ids)
+        self.assertIn("blood_binary", tool_ids)
+        self.assertIn("ocr", tool_ids)
+        self.assertIn("effective_policy", tool_ids)
+        self.assertGreaterEqual(body["timing"]["total_ms"], 0)
+        timing_ids = {
+            stage["id"] for stage in body["timing"]["stages"]
+        }
+        self.assertIn("service.total", timing_ids)
+        self.assertIn("analyze_image", timing_ids)
+        self.assertNotIn("image_path", json.dumps(body))
         bad = client.post(
             "/api/review",
             files={"image": ("bad.jpg", b"not-image", "image/jpeg")},
         )
         self.assertEqual(bad.status_code, 400)
         self.assertEqual(set(bad.json()), {"code", "message", "id"})
+
+    def test_structured_api_marks_skipped_and_text_tools_explicitly(self):
+        service, _ = self.make_service(
+            engine=FixedEngine(evidence(0)),
+            text_detector=StaticDetector(True),
+            ocr_client=CountingOCR(["ordinary text"]),
+        )
+        init_service(service, max_image_mb=1)
+        client = TestClient(app)
+        payload = client.post(
+            "/api/review",
+            files={"image": ("text.png", image_bytes(), "image/png")},
+        ).json()
+        tools = {
+            tool["id"]: tool
+            for group in payload["groups"]
+            for tool in group["tools"]
+        }
+        self.assertEqual(tools["text_detector"]["status"], "detected")
+        self.assertEqual(tools["ocr"]["status"], "ok")
+        self.assertIn(
+            "ordinary text",
+            tools["ocr"]["details"]["text_preview"],
+        )
+        self.assertEqual(
+            tools["ocr"]["details"]["text_evidence"]["status"],
+            "readable",
+        )
+        self.assertEqual(tools["text_semantic_rag"]["status"], "ok")
+        self.assertIn("scene_prompt", tools)
+        self.assertEqual(tools["scene_prompt"]["status"], "not_available")
+        self.assertNotIn("blood_visual_review", tools)
+
+    def test_virtual_domain_labels_and_no_legacy_blood_review_row(self):
+        item = evidence(0)
+        item["anime_style"] = {
+            "score": 0.99,
+            "threshold": 0.90,
+            "is_anime": True,
+            "source": "frozen_clip_embedding_router",
+        }
+        service, _ = self.make_service(engine=FixedEngine(item))
+        init_service(service, max_image_mb=1)
+        client = TestClient(app)
+        body = client.post(
+            "/api/review",
+            files={"image": ("virtual.png", image_bytes(), "image/png")},
+        ).json()
+        self.assertEqual(body["result"]["domain"], "virtual")
+        self.assertEqual(
+            body["result"]["domain_label"],
+            "虚拟（二次元 / 插画 / 游戏场景等）",
+        )
+        tools = {
+            tool["id"]: tool
+            for group in body["groups"]
+            for tool in group["tools"]
+        }
+        self.assertEqual(tools["anime_router"]["label"], "虚拟风格路由")
+        self.assertEqual(
+            tools["anime_visual_review"]["label"],
+            "虚拟视觉证据复核",
+        )
+        self.assertNotIn("blood_visual_review", tools)
 
     def test_decompression_bomb_is_invalid_image(self):
         service, _ = self.make_service()
@@ -353,11 +475,79 @@ class FixedWorkflowAndAPITests(unittest.TestCase):
         page = client.get("/")
         self.assertEqual(page.status_code, 200)
         self.assertIn("ImageGuard", page.text)
-        self.assertEqual(client.get("/styles.css").status_code, 200)
-        self.assertEqual(client.get("/app.js").status_code, 200)
+        self.assertIn("app.js?v=20261029-2", page.text)
+        self.assertEqual(page.headers["cache-control"], "no-store, max-age=0")
+        styles = client.get("/styles.css")
+        script = client.get("/app.js")
+        self.assertEqual(styles.status_code, 200)
+        self.assertEqual(script.status_code, 200)
+        self.assertEqual(styles.headers["cache-control"], "no-store, max-age=0")
+        self.assertEqual(script.headers["cache-control"], "no-store, max-age=0")
         health = client.get("/health")
         self.assertEqual(health.status_code, 200)
         self.assertTrue(health.json()["service_ready"])
+
+    def test_record_history_feedback_and_csv_export_api(self):
+        service, _ = self.make_service(engine=FixedEngine(evidence(0)))
+        init_service(service, max_image_mb=1)
+        client = TestClient(app)
+        created = client.post(
+            "/api/review",
+            data={"workspace_id": "workspace-api"},
+            files={"image": ("review.png", image_bytes(), "image/png")},
+        ).json()
+        record_id = created["id"]
+
+        listed = client.get(
+            "/api/records",
+            params={"domain": "real", "workspace_id": "workspace-api"},
+        ).json()
+        self.assertEqual(listed["items"][0]["id"], record_id)
+        self.assertEqual(listed["total"], 1)
+        detail = client.get(f"/api/records/{record_id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["action"], "allow")
+
+        feedback = client.post(
+            f"/api/records/{record_id}/feedback",
+            json={
+                "resolution": "adjust",
+                "final_action": "limit",
+                "adjustment_direction": "upgrade",
+                "reason": "人工复核要求限流",
+            },
+        )
+        self.assertEqual(feedback.status_code, 200)
+        self.assertEqual(feedback.json()["queue"], "human")
+        self.assertEqual(feedback.json()["final_action"], "limit")
+        self.assertEqual(feedback.json()["adjustment_direction"], "upgrade")
+        self.assertEqual(feedback.json()["current_level"], "L1")
+
+        exported = client.get("/api/records/export.csv")
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn(record_id, exported.text)
+        self.assertIn("人工复核要求限流", exported.text)
+        image = client.get(f"/api/records/{record_id}/image")
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(image.headers["content-type"], "image/png")
+
+        cleared = client.post(
+            "/api/records/clear",
+            params={"workspace_id": "workspace-api"},
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json()["cleared"], 1)
+        self.assertEqual(
+            client.get(
+                "/api/records",
+                params={"workspace_id": "workspace-api"},
+            ).json()["total"],
+            0,
+        )
+        self.assertEqual(
+            client.get(f"/api/records/{record_id}/image").status_code,
+            404,
+        )
 
 
 if __name__ == "__main__":

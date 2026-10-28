@@ -125,6 +125,17 @@ class EffectivePolicyTests(unittest.TestCase):
         result = decide(item, DecisionPolicy())
         self.assertEqual(result["action"], "review")
         self.assertEqual(result["risk_raw"], RISK_CLASSES[2])
+        self.assertEqual(result["recommended_action"], "limit")
+        self.assertTrue(result["review_hint"])
+        self.assertIn("建议", result["recommended_action_label"])
+
+    def test_review_with_severe_support_recommends_block_without_changing_action(self):
+        item = evidence(3, 0, .8)
+        item["blood_binary"] = binary(.9)
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "review")
+        self.assertEqual(result["recommended_action"], "block")
+        self.assertEqual(result["recommended_action_label"], "建议下架")
 
     def test_real_l1_low_confidence_can_relax_in_narrow_gate(self):
         item = evidence(1, 1, .52)

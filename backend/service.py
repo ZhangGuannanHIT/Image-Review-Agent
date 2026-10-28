@@ -17,7 +17,11 @@ from PIL import Image
 from typing import Any
 
 from . import tools as tools_mod
-from .explanation import compose_final_suggestion, generate_final_explanation
+from .explanation import (
+    build_program_explanation,
+    compose_final_suggestion,
+    generate_final_explanation,
+)
 from .schemas import ReviewResponse
 from .policy import DecisionPolicy, decide
 from . import rag as rag_mod
@@ -27,6 +31,7 @@ from .text_evidence import (
 from .text_detection import LightweightTextDetector
 from .text_semantic import TextSemanticReviewer
 from .anime_vision_policy import anime_visual_gate, reconcile_anime_visual
+from .presentation import build_frontend_payload
 from .vision import VisionGate
 from .workflow import FixedReviewWorkflow
 
@@ -52,10 +57,14 @@ class ReviewService:
         scene_concepts_enabled: bool = False,
         scene_options: dict | None = None,
         explanation_enabled: bool = True,
+        explanation_mode: str = "selective",
+        explanation_llm_actions: list[str] | tuple[str, ...] | None = None,
         text_semantic_reviewer: Any = None,
         anime_visual_reviewer: Any = None,
         anime_visual_enabled: bool = False,
         anime_visual_min_style_score: float = 0.90,
+        anime_visual_allow_safety_review: bool = False,
+        record_store: Any = None,
     ):
         self.llm_model = llm_model
         self.engine = engine
@@ -70,6 +79,9 @@ class ReviewService:
         self.anime_visual_reviewer = anime_visual_reviewer
         self.anime_visual_enabled = bool(anime_visual_enabled)
         self.anime_visual_min_style_score = float(anime_visual_min_style_score)
+        self.anime_visual_allow_safety_review = bool(
+            anime_visual_allow_safety_review
+        )
         self.tools = tools_mod.build_tools(
             engine,
             ocr_client,
@@ -94,7 +106,21 @@ class ReviewService:
         self.log_dir = log_dir
         self.mock_mode = mock_mode
         self.explanation_enabled = explanation_enabled
+        self.explanation_mode = str(explanation_mode or "selective")
+        if self.explanation_mode not in {"selective", "always", "off"}:
+            raise ValueError("explanation_mode 必须是 selective、always 或 off")
+        self.explanation_llm_actions = frozenset(
+            explanation_llm_actions or ("review", "block")
+        )
+        invalid_actions = self.explanation_llm_actions - {
+            "allow", "limit", "review", "block",
+        }
+        if invalid_actions:
+            raise ValueError(
+                "不支持的 LLM 解释动作: " + ", ".join(sorted(invalid_actions))
+            )
         self.save_images = save_images
+        self.record_store = record_store
         self.model_identity = {"checkpoint": str(getattr(engine, "ckpt_dir", "")),
                                "trained": bool(getattr(engine, "trained", False)),
                                "anime_style_router_loaded": bool(
@@ -124,6 +150,35 @@ class ReviewService:
     @property
     def ready(self) -> bool:
         return self.workflow is not None and self.engine is not None
+
+    def _save_history(
+        self,
+        response: ReviewResponse,
+        filename: str,
+        image_path: str,
+        workspace_id: str,
+    ) -> None:
+        if self.record_store is None:
+            return
+        try:
+            self.record_store.save_response(
+                response,
+                filename=filename,
+                image_path=image_path,
+                workspace_id=workspace_id,
+            )
+        except Exception:  # History must not break the review response.
+            return
+
+    def _use_llm_explanation(self, decision: dict[str, Any]) -> tuple[bool, str]:
+        if not self.explanation_enabled or self.explanation_mode == "off":
+            return False, "llm_disabled"
+        if self.explanation_mode == "always":
+            return True, "always"
+        action = str(decision.get("action") or "")
+        if action in self.explanation_llm_actions:
+            return True, "selective_action"
+        return False, "program_action"
 
     @staticmethod
     def _redact_text(text: str) -> str:
@@ -224,6 +279,7 @@ class ReviewService:
         self,
         context: tools_mod.RequestToolContext,
         log: dict[str, Any],
+        timings: dict[str, float],
     ) -> str | None:
         """完成结构化证据包、程序裁决和最终 LLM 解释。"""
         if "analyze_image" not in context.cache:
@@ -273,12 +329,29 @@ class ReviewService:
             evidence["scene_concepts"] = context.cache["match_scene_concepts"]
             log["scene_concepts"] = context.cache["match_scene_concepts"]
 
+        started = time.monotonic()
         decision_evidence = build_decision_evidence(evidence)
+        timings["policy.build_evidence"] = round(
+            (time.monotonic() - started) * 1000
+        )
+        log["decision_evidence"] = decision_evidence
+
+        started = time.monotonic()
         decision = decide(evidence, self.policy, context.cache.get("review_blood"))
+        timings["policy.decision"] = round(
+            (time.monotonic() - started) * 1000
+        )
+        log["decision"] = decision
+
+        started = time.monotonic()
         visual_gate = anime_visual_gate(
             decision,
             evidence,
             min_style_score=self.anime_visual_min_style_score,
+            allow_safety_review=self.anime_visual_allow_safety_review,
+        )
+        timings["policy.anime_gate"] = round(
+            (time.monotonic() - started) * 1000
         )
         log["anime_visual_gate"] = visual_gate
         if (
@@ -286,19 +359,32 @@ class ReviewService:
             and self.anime_visual_reviewer is not None
             and visual_gate["eligible"]
         ):
+            started = time.monotonic()
             review = self.anime_visual_reviewer.review(context.image)
+            timings["policy.anime_visual"] = round(
+                (time.monotonic() - started) * 1000
+            )
             decision = reconcile_anime_visual(decision, evidence, review)
             log["anime_visual_review"] = review
-        if self.explanation_enabled:
+            log["decision"] = decision
+        use_llm, explanation_reason = self._use_llm_explanation(decision)
+        if use_llm:
+            started = time.monotonic()
             explanation_result = generate_final_explanation(
                 self.llm_model, decision_evidence, decision
             )
+            timings["explanation"] = round(
+                (time.monotonic() - started) * 1000
+            )
         else:
-            explanation_result = {
-                "status": "disabled",
-                "reason": "feature_disabled",
-            }
+            explanation_result = build_program_explanation(
+                decision,
+                decision_evidence,
+                skip_reason=explanation_reason,
+            )
+        started = time.monotonic()
         suggestion = compose_final_suggestion(decision, explanation_result)
+        timings["compose"] = round((time.monotonic() - started) * 1000)
 
         log["decision_evidence"] = decision_evidence
         log["decision"] = decision
@@ -306,17 +392,26 @@ class ReviewService:
         log["text_evidence"] = text_assessment
         log["search_knowledge_hits"] = knowledge_hits
         log["final_explanation"] = explanation_result
-        log["suggestion_source"] = (
-            "llm_explanation"
-            if explanation_result.get("status") == "ok"
-            else "deterministic_fallback"
-        )
+        explanation_source = explanation_result.get("source", "program_template")
+        log["suggestion_source"] = {
+            "llm_template": "llm_explanation",
+            "program_template_fallback": "deterministic_fallback",
+            "program_template": "program_template",
+        }.get(explanation_source, explanation_source)
+        log["explanation_mode"] = self.explanation_mode
         return suggestion
 
-    def review(self, image_bytes: bytes, filename: str = "") -> ReviewResponse:
+    def review(
+        self,
+        image_bytes: bytes,
+        filename: str = "",
+        workspace_id: str = "default",
+    ) -> ReviewResponse:
         started = time.monotonic()
         request_id = uuid.uuid4().hex
         token = tools_mod.set_current_image(image_bytes)
+        context = tools_mod.get_request_context()
+        timings: dict[str, float] = {}
         log: dict[str, Any] = {
             "request_id": request_id,
             "filename": filename,
@@ -328,6 +423,7 @@ class ReviewService:
         }
         try:
             if self.save_images:
+                image_started = time.monotonic()
                 image_dir = Path(self.log_dir) / "images"
                 image_dir.mkdir(parents=True, exist_ok=True)
                 # 用服务生成的编号命名，不把上传文件名当路径。
@@ -337,13 +433,25 @@ class ReviewService:
                 image_path = image_dir / f"{request_id}{extension}"
                 image_path.write_bytes(image_bytes)
                 log["image_path"] = str(image_path.resolve())
+                timings["service.image_persist"] = round(
+                    (time.monotonic() - image_started) * 1000
+                )
+            workflow_started = time.monotonic()
             result = self.workflow.run()
-            context = tools_mod.get_request_context()
+            timings["workflow.total"] = round(
+                (time.monotonic() - workflow_started) * 1000
+            )
+            timings.update(context.timings_ms)
             if result.get("clip_succeeded"):
-                policy_suggestion = self._finalize_policy_decision(context, log)
+                policy_suggestion = self._finalize_policy_decision(
+                    context, log, timings
+                )
                 suggestion = policy_suggestion or "未能生成审核建议，请稍后重试。"
             else:
                 suggestion = "未能取得 CLIP 视觉证据，无法完成图片审核，请稍后重试。"
+            timings["service.total"] = round(
+                (time.monotonic() - started) * 1000
+            )
             log.update({
                 "workflow_version": result.get("workflow_version"),
                 "clip_called": result.get("clip_called", False),
@@ -355,23 +463,71 @@ class ReviewService:
                 "steps": result.get("steps", []),
                 "suggestion": suggestion,
                 "elapsed_ms": round((time.monotonic() - started) * 1000),
+                "timings_ms": {
+                    key: round(value)
+                    for key, value in timings.items()
+                },
             })
+            payload = build_frontend_payload(
+                log,
+                context.cache,
+                timings,
+                redact_text=self._redact_text,
+            )
             self._log(log)
-            return ReviewResponse(id=request_id, suggestion=suggestion)
+            response = ReviewResponse(
+                id=request_id,
+                suggestion=suggestion,
+                **payload,
+            )
+            self._save_history(
+                response,
+                filename,
+                str(log.get("image_path", "")),
+                workspace_id,
+            )
+            return response
         except Exception as exc:  # noqa: BLE001
             suggestion = "审核流程暂不可用，无法完成本次审核，请稍后重试。"
-            context = tools_mod.get_request_context()
-            policy_suggestion = self._finalize_policy_decision(context, log)
-            if policy_suggestion:
-                suggestion = policy_suggestion
+            timings.update(context.timings_ms)
+            if "decision" not in log and "analyze_image" in context.cache:
+                policy_suggestion = self._finalize_policy_decision(
+                    context, log, timings
+                )
+                if policy_suggestion:
+                    suggestion = policy_suggestion
+            timings["service.total"] = round(
+                (time.monotonic() - started) * 1000
+            )
             log.update({
                 "error": f"{type(exc).__name__}: {exc}",
                 "degraded": True,
                 "suggestion": suggestion,
                 "tool_cache": context.cache,
                 "elapsed_ms": round((time.monotonic() - started) * 1000),
+                "timings_ms": {
+                    key: round(value)
+                    for key, value in timings.items()
+                },
             })
+            payload = build_frontend_payload(
+                log,
+                context.cache,
+                timings,
+                redact_text=self._redact_text,
+            )
             self._log(log)
-            return ReviewResponse(id=request_id, suggestion=suggestion)
+            response = ReviewResponse(
+                id=request_id,
+                suggestion=suggestion,
+                **payload,
+            )
+            self._save_history(
+                response,
+                filename,
+                str(log.get("image_path", "")),
+                workspace_id,
+            )
+            return response
         finally:
             tools_mod.reset_current_image(token)

@@ -8,11 +8,30 @@ from typing import Any
 from src.labels import RISK_CLASSES
 
 
+def _sync_recommendation(
+    result: dict[str, Any],
+    action: str,
+    reason: str = "",
+) -> None:
+    result.update(
+        recommended_action=action,
+        recommended_action_label={
+            "allow": "建议放行",
+            "limit": "建议限流",
+            "review": "建议人工判断",
+            "block": "建议下架",
+        }[action],
+        review_hint=action == "review",
+        review_reason=reason if action == "review" else "",
+    )
+
+
 def anime_visual_gate(
     decision: dict[str, Any],
     evidence: dict[str, Any],
     *,
     min_style_score: float = 0.90,
+    allow_safety_review: bool = False,
 ) -> dict[str, Any]:
     style = evidence.get("anime_style") or {}
     scene_domain = (
@@ -29,9 +48,31 @@ def anime_visual_gate(
         anime_route = bool(scene_domain.get("anime_matched"))
         route_source = "scene_prompt"
     reasons = []
+    safety_signals: list[str] = []
     if not anime_route:
         reasons.append("style_score_below_threshold")
-    if decision.get("action") not in {"limit", "review", "block"}:
+    action = decision.get("action")
+    if action in {"limit", "review", "block"}:
+        action_reviewable = True
+    elif action == "allow" and allow_safety_review:
+        risk = decision.get("risk_raw")
+        quality_labels = set(
+            (evidence.get("quality") or {}).get("labels") or []
+        )
+        if risk in {RISK_CLASSES[2], RISK_CLASSES[3]}:
+            safety_signals.append("elevated_risk_on_allow")
+        if quality_labels & {
+            "严重模糊",
+            "故意遮挡（马赛克/黑条/贴纸）",
+            "文字扭曲形变",
+        }:
+            safety_signals.append("quality_uncertainty_on_allow")
+        if decision.get("binary_state") in {"positive", "uncertain"}:
+            safety_signals.append("binary_uncertainty_on_allow")
+        action_reviewable = bool(safety_signals)
+        if not action_reviewable:
+            reasons.append("allow_without_safety_signal")
+    else:
         reasons.append("action_not_reviewable")
     if text.get("grounded_violation"):
         reasons.append("grounded_text_violation")
@@ -50,6 +91,8 @@ def anime_visual_gate(
         "anime_route": anime_route,
         "action": decision.get("action"),
         "risk": decision.get("risk_raw"),
+        "allow_safety_review": bool(allow_safety_review),
+        "safety_signals": safety_signals,
     }
 
 
@@ -105,12 +148,31 @@ def reconcile_anime_visual(
             conflict_type="anime_game_context",
             reason="明确游戏或虚构语境，未见伤害或对他人的明确威胁，撤回候选限制",
         )
+        _sync_recommendation(result, "allow")
         result["anime_visual_effect"] = "withdraw_game_context"
         result["anime_visual_resolution"] = "allow"
         return result
     if attack == "present" or threat == "present" or injury in {
         "moderate", "severe"
     }:
+        if result.get("action") == "allow":
+            escalated_risk = (
+                RISK_CLASSES[2]
+                if injury in {"moderate", "severe"}
+                else RISK_CLASSES[1]
+            )
+            result.update(
+                action="limit",
+                effective_risk=escalated_risk,
+                level=escalated_risk,
+                uncertain=False,
+                conflict_type="anime_visual_safety_escalation",
+                reason="虚拟内容初步放行后，视觉复核发现明确伤害、攻击或威胁，改为限流",
+            )
+            _sync_recommendation(result, "limit")
+            result["anime_visual_effect"] = "visual_risk_escalated_from_allow"
+            result["anime_visual_resolution"] = "limit"
+            return result
         result["anime_visual_effect"] = "visual_risk_supported"
         result["anime_visual_resolution"] = "keep"
         return result
@@ -137,6 +199,7 @@ def reconcile_anime_visual(
             conflict_type="anime_visual_mild_boundary",
             reason="动漫视觉复核未确认明确伤害、攻击或威胁，按 L1 限流且不转人工",
         )
+        _sync_recommendation(result, "limit")
         result["anime_visual_effect"] = "withdraw_to_l1"
         result["anime_visual_resolution"] = "limit"
         return result
@@ -149,6 +212,7 @@ def reconcile_anime_visual(
         conflict_type="anime_visual_withdrawn",
         reason="动漫视觉复核未见伤害、攻击或明确武器指向，撤回候选限流",
     )
+    _sync_recommendation(result, "allow")
     result["anime_visual_effect"] = "withdraw_to_allow"
     result["anime_visual_resolution"] = "allow"
     return result

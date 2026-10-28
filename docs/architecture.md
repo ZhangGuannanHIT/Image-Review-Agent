@@ -15,9 +15,8 @@ flowchart TD
     WF --> CLIP[analyze_image / FG-CLIP2]
     CLIP --> BINARY[binary injury]
     CLIP --> QUALITY[quality fusion]
-    WF --> BLOOD[review_blood / optional]
     WF --> DETECT[detect_text / lightweight]
-    DETECT -->|detected or failed| OCR[ocr_image]
+    DETECT -->|detected or failed| OCR[ocr_image / local GLM-OCR]
     OCR --> RAG[assess_text_evidence / local RAG]
     RAG --> TSEM[grounded OCR semantic review]
     WF -->|risk non-L0| SCENE[match_scene_concepts]
@@ -29,8 +28,11 @@ flowchart TD
     ACTION -->|high-confidence anime and non-allow| AVIS[anime visual evidence review]
     AVIS --> POLICY2[program reconciliation]
     POLICY2 --> ACTION
-    ACTION --> EXPLAIN[LLM explanation]
+    ACTION -->|allow / limit| TEMPLATE[program explanation template]
+    ACTION -->|review / block| EXPLAIN[fixed-schema LLM explanation]
+    EXPLAIN -->|failure| TEMPLATE
     EXPLAIN --> API
+    TEMPLATE --> API
 ```
 
 不存在 ReAct 循环、LLM 工具选择、`finalize_review` 或 LangGraph 调用守卫。
@@ -40,14 +42,16 @@ flowchart TD
 | 工具 | 触发条件 | 职责 |
 |---|---|---|
 | `analyze_image` | 每张图 | risk、type、injury、quality fusion、binary |
-| `review_blood` | 可选且满足血腥复核门控 | 仅复核血腥维度 |
 | `detect_text` | 每张图 | 判断是否存在文字候选区域 |
-| `ocr_image` | 文字检测命中或检测失败 | 提取文字，不做判罚 |
+| `ocr_image` | 文字检测命中或检测失败 | 调用本地 GLM-OCR 整图识别，不做判罚 |
 | `assess_text_evidence` | OCR 成功后 | 文本质量和本地 RAG 规则命中 |
 | `text_semantic_review` | OCR 有非空文本 | 逐字 quote 校验和文字违规语义 |
 | `match_scene_concepts` | risk 非 L0 | 风险场景、安全语境、混淆项、域候选 |
 
 请求级图片和缓存存放在 `ContextVar`，不进入 LLM 或前端状态。
+
+`review_blood` 是早期实验遗留代码，不属于当前固定流程。`run_backend.py`
+不会创建该客户端，因此生产服务不会注册、调用或展示这一工具；前端也只展示实际执行过的复核。
 
 ## 4. 文字检测
 
@@ -77,6 +81,11 @@ OCR 文本语义复核只输出 `violation/safe/uncertain`。`violation` 必须�
 原文中逐字出现且至少 3 字符的 `quote`，同时说明对象和伤害动作；`quote`
 内容不匹配时判为无效，不允许模型补造。另保留一个窄规则，只处理
 “条件/邀请行为 + 第一人称伤害响应”，同时排除新闻、引用、否定和虚构表达。
+
+生产 OCR 使用独立 `glmocr` conda 环境中的 GLM-OCR 0.9B。vLLM 在 GPU
+提供 OpenAI 兼容接口，PP-DocLayoutV3 文档布局模型在 CPU 上作为可选文档模式；
+普通图片审核绕过布局流水线，直接进行一次整图 `Text Recognition:` 请求。
+OCR 与场景 Prompt 在 CLIP 完成后并行执行。
 
 ## 5. 模型输出
 
@@ -144,6 +153,15 @@ threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作
 
 详细说明见 [ANIME_VISION_STRATEGY_2026-10-27.md](ANIME_VISION_STRATEGY_2026-10-27.md)。
 
+### 7.1 解释策略
+
+解释层以程序模板为主。`allow`、`limit` 不调用解释 LLM；`review`、`block`
+才调用 LLM，并且 LLM 只能填写 `summary`、`evidence_note`、`limitation`
+三个固定字段。动作、有效风险、复核建议和程序理由始终由程序生成。
+
+`review` 会额外输出 `recommended_action`、`review_reason`。例如建议限流或建议下架，
+用于指导人工操作，但不改变 `action=review`。
+
 ## 8. 场景 Prompt
 
 场景概念来自冻结 FG-CLIP2 图文相似度：
@@ -161,6 +179,7 @@ threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作
 
 - 输入图片哈希、请求编号、模型和 checkpoint 身份；
 - 工具步骤、耗时、错误类型；
+- 后端总耗时及模型、文字、复核、解释、策略阶段的毫秒耗时；
 - CLIP/binary/quality 全部分数和阈值；
 - 文字检测状态、区域数和置信度；
 - OCR 状态、字符数、文本 SHA-256、平均置信度和请求 ID；
@@ -194,4 +213,5 @@ python -B -m src.evaluate_effective_policy ...
 python -B -m src.evaluate_text_detection ...
 ```
 
-当前自动化测试覆盖固定流程、文字检测门控、域证据、真实/动漫策略、日志脱敏、API 和解释权限。
+当前自动化测试覆盖固定流程、文字检测门控、域证据、真实/动漫策略、日志脱敏、
+结构化 API、工具状态分组、耗时埋点、前端结果工作台和解释权限。

@@ -74,6 +74,14 @@ class TextEvidenceTests(unittest.TestCase):
         })
         self.assertEqual(result["status"], "partial")
 
+    def test_long_local_ocr_without_confidence_is_readable(self):
+        result = assess_text_evidence({
+            "success": True,
+            "texts": ["local OCR text without confidence"],
+            "mean_confidence": None,
+        })
+        self.assertEqual(result["status"], "readable")
+
     def test_readable_text_gets_rag_rules(self):
         result = assess_text_evidence(
             {

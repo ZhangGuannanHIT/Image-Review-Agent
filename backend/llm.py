@@ -61,7 +61,14 @@ class LLMClient:
     def available(self) -> bool:
         return bool(self.config.base_url and self.config.api_key and self.config.model)
 
-    def build_model(self) -> Any:
+    def build_model(
+        self,
+        *,
+        max_retries: int | None = None,
+        max_tokens: int | None = None,
+        response_format: dict[str, Any] | None = None,
+        disable_thinking: bool = False,
+    ) -> Any:
         """返回 LangChain ChatOpenAI 实例（OpenAI 兼容接口）。"""
         if not self.available():
             raise RuntimeError(
@@ -69,12 +76,31 @@ class LLMClient:
                 "或设置环境变量 LLM_API_KEY"
             )
         from langchain_openai import ChatOpenAI
+        model_kwargs = {}
+        if response_format:
+            model_kwargs["response_format"] = response_format
+        extra_body = (
+            {"thinking": {"type": "disabled"}}
+            if disable_thinking else None
+        )
+        kwargs = {
+            "model": self.config.model,
+            "base_url": self.config.base_url,
+            "api_key": self.config.api_key,
+            "timeout": self.config.timeout,
+            "temperature": self.config.temperature,
+            "max_retries": (
+                self.config.max_retries
+                if max_retries is None else int(max_retries)
+            ),
+        }
+        if model_kwargs:
+            kwargs["model_kwargs"] = model_kwargs
+        if max_tokens is not None:
+            kwargs["max_tokens"] = int(max_tokens)
+        if extra_body is not None:
+            kwargs["extra_body"] = extra_body
         return ChatOpenAI(
-            model=self.config.model,
-            base_url=self.config.base_url,
-            api_key=self.config.api_key,
-            timeout=self.config.timeout,
-            temperature=self.config.temperature,
-            max_retries=self.config.max_retries,
+            **kwargs,
         )
 

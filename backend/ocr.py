@@ -76,6 +76,26 @@ class AliyunOCRConfig:
         return cls(**{**configured.__dict__, "appcode": appcode})
 
 
+@dataclass(frozen=True)
+class LocalGLMOCRConfig:
+    provider: str = "local_glm_ocr"
+    model: str = "glm-ocr"
+    endpoint: str = "http://127.0.0.1:8080/v1/chat/completions"
+    timeout: int = 180
+    max_image_mb: int = 15
+    max_side: int = 1280
+    api_mode: str = "direct_vllm"
+    prompt: str = "Text Recognition:"
+    max_tokens: int = 2048
+
+    @classmethod
+    def from_yaml(cls, path: str) -> "LocalGLMOCRConfig":
+        with open(path, "r", encoding="utf-8") as file:
+            raw = yaml.safe_load(file) or {}
+        section = raw.get("local_glm_ocr", raw)
+        return cls(**section)
+
+
 def _failure(config: Any, error: str, available: bool = True) -> dict[str, Any]:
     return {
         "success": False,
@@ -114,6 +134,28 @@ def _prepare_image(image_bytes: bytes, max_bytes: int) -> tuple[bytes, str]:
     return prepared, mime_type
 
 
+def _prepare_local_image(
+    image_bytes: bytes,
+    *,
+    max_bytes: int,
+    max_side: int,
+) -> tuple[bytes, str]:
+    if not image_bytes:
+        raise ValueError("empty_image")
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            image = source.convert("RGB")
+            image.thumbnail((max_side, max_side))
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=92)
+            prepared = output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise ValueError("invalid_image") from exc
+    if len(prepared) > max_bytes:
+        raise ValueError("image_too_large")
+    return prepared, "image/jpeg"
+
+
 def _iter_layout_items(layout_details: Any):
     if isinstance(layout_details, list):
         for item in layout_details:
@@ -150,7 +192,11 @@ def _parse_response(payload: dict[str, Any], config: GLMOCRConfig) -> dict[str, 
         "texts": texts,
         "boxes": boxes,
         "box_format": "normalized_xyxy",
-        "request_id": str(payload.get("request_id", "") or ""),
+        "request_id": str(
+            payload.get("request_id", "")
+            or payload.get("id", "")
+            or ""
+        ),
         "mean_confidence": None,
         "line_confidences": [],
         "error": None,
@@ -225,7 +271,11 @@ class OCRClient:
                 appcode=legacy.get("appcode", ""),
                 timeout=int(legacy.get("timeout", AliyunOCRConfig.timeout)),
             )
-        if config.provider not in {"aliyun_market_ocr", "glm_ocr"}:
+        if config.provider not in {
+            "aliyun_market_ocr",
+            "glm_ocr",
+            "local_glm_ocr",
+        }:
             raise ValueError(f"不支持的 OCR Provider: {config.provider}")
         self.config = config
 
@@ -233,30 +283,64 @@ class OCRClient:
     def from_config(cls, path: str) -> "OCRClient":
         with open(path, "r", encoding="utf-8") as file:
             raw = yaml.safe_load(file) or {}
+        if "local_glm_ocr" in raw:
+            return cls(LocalGLMOCRConfig.from_yaml(path))
         if "aliyun_market_ocr" in raw:
             return cls(AliyunOCRConfig.from_yaml(path))
         return cls(GLMOCRConfig.from_yaml(path))
 
     def available(self) -> bool:
-        credential = (
-            self.config.appcode
-            if self.config.provider == "aliyun_market_ocr"
-            else self.config.api_key
-        )
+        if self.config.provider == "local_glm_ocr":
+            return bool(self.config.endpoint and self.config.model)
+        credential = self.config.appcode if (
+            self.config.provider == "aliyun_market_ocr"
+        ) else self.config.api_key
         return bool(self.config.endpoint and credential and self.config.model)
 
     def recognize(self, image_bytes: bytes) -> dict[str, Any]:
         if not self.available():
             return _failure(self.config, "not_configured", available=False)
         try:
-            prepared, mime_type = _prepare_image(
-                image_bytes, max_bytes=self.config.max_image_mb * 1024 * 1024
-            )
+            if self.config.provider == "local_glm_ocr":
+                prepared, mime_type = _prepare_local_image(
+                    image_bytes,
+                    max_bytes=self.config.max_image_mb * 1024 * 1024,
+                    max_side=self.config.max_side,
+                )
+            else:
+                prepared, mime_type = _prepare_image(
+                    image_bytes,
+                    max_bytes=self.config.max_image_mb * 1024 * 1024,
+                )
         except ValueError as exc:
             return _failure(self.config, str(exc))
 
         encoded = base64.b64encode(prepared).decode("ascii")
-        if self.config.provider == "aliyun_market_ocr":
+        if self.config.provider == "local_glm_ocr":
+            image_data = f"data:{mime_type};base64,{encoded}"
+            if self.config.api_mode == "direct_vllm":
+                request_body = {
+                    "model": self.config.model,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": self.config.prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_data},
+                            },
+                        ],
+                    }],
+                    "temperature": 0.0,
+                    "max_tokens": self.config.max_tokens,
+                }
+            else:
+                request_body = {
+                    "images": [image_data],
+                    "model": self.config.model,
+                }
+            headers = {"Content-Type": "application/json"}
+        elif self.config.provider == "aliyun_market_ocr":
             request_body = {
                 "img": encoded,
                 "prob": self.config.prob,
@@ -296,6 +380,30 @@ class OCRClient:
             payload = response.json()
             if not isinstance(payload, dict):
                 return _failure(self.config, "invalid_response")
+            if (
+                self.config.provider == "local_glm_ocr"
+                and self.config.api_mode == "direct_vllm"
+            ):
+                choices = payload.get("choices") or []
+                content = ""
+                if choices and isinstance(choices[0], dict):
+                    message = choices[0].get("message") or {}
+                    content = str(message.get("content", "") or "").strip()
+                if not content:
+                    return _failure(self.config, "empty_response")
+                return {
+                    "success": True,
+                    "available": True,
+                    "provider": self.config.provider,
+                    "model": self.config.model,
+                    "texts": [content],
+                    "boxes": [],
+                    "box_format": "normalized_xyxy",
+                    "request_id": str(payload.get("id", "") or ""),
+                    "mean_confidence": None,
+                    "line_confidences": [],
+                    "error": None,
+                }
             if self.config.provider == "aliyun_market_ocr":
                 return _parse_aliyun_response(payload, self.config)
             return _parse_response(payload, self.config)
@@ -304,6 +412,8 @@ class OCRClient:
         except requests.HTTPError as exc:
             status = getattr(exc.response, "status_code", "unknown")
             return _failure(self.config, f"http_{status}")
+        except requests.ConnectionError:
+            return _failure(self.config, "service_unavailable")
         except (requests.RequestException, ValueError):
             return _failure(self.config, "request_failed")
 

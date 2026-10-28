@@ -87,7 +87,13 @@ def parse_visual_review(content: str) -> AnimeVisualEvidence:
         text = text[8:-3].strip()
     elif text.startswith("```\n") and text.endswith("```"):
         text = text[4:-3].strip()
-    return AnimeVisualEvidence.model_validate_json(text)
+    payload = json.loads(text)
+    if (
+        isinstance(payload, dict)
+        and payload.get("type") == "json_object"
+    ):
+        payload.pop("type")
+    return AnimeVisualEvidence.model_validate(payload)
 
 
 class AnimeVisualReviewer:
@@ -117,6 +123,11 @@ class AnimeVisualReviewer:
                     },
                 ]),
             ])
+            finish_reason = (
+                getattr(response, "response_metadata", {}) or {}
+            ).get("finish_reason")
+            if finish_reason == "length":
+                raise ValueError("response_truncated")
             evidence = parse_visual_review(str(getattr(response, "content", response)))
             return {
                 "status": "ok",

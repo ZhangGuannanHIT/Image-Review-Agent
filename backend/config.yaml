@@ -29,7 +29,10 @@ features:
   lowlevel_enabled: true
   rag_enabled: true           # 启用本地规则与案例检索，无额外服务依赖
   scene_concepts_enabled: true # 仅风险非 L0 时由固定工作流调用
-  llm_explanation_enabled: true # 程序裁决后由 LLM 仅生成解释，不改变动作
+  llm_explanation_enabled: true
+  # selective: 仅指定动作调用 LLM，其他动作使用固定程序模板。
+  llm_explanation_mode: "selective"
+  llm_explanation_actions: ["review", "block"]
 
 scene_concepts:
   config_path: "config/scene_concepts.yaml"
@@ -50,6 +53,7 @@ text_detection:
   min_aligned_glyphs: 2
 
 log_dir: "backend/logs"
+history_db: "data/reviews.sqlite3"
 
 # 血腥单头的临时业务门槛，未重新标定；风险保留 argmax，类型使用 inference.yaml。
 decision_policy:
@@ -61,16 +65,14 @@ decision_policy:
 audit:
   save_images: true
 
-vision_review:
-  enabled: false  # 默认不把原图发送给外部 LLM；仅在显式审计模式开启
-  trigger:
-    max_confidence: 0.65
-    min_margin: 0.20
-
 anime_vision_review:
   # Only high-confidence anime routes and non-allow provisional actions call
   # the image-capable LLM. Failures never withdraw the original action.
   enabled: true
   max_side: 1280
   min_style_score: 0.90
+  allow_safety_review: true
+  max_tokens: 512
+  max_retries: 1
+  json_response: true
 

@@ -56,6 +56,11 @@ def main() -> None:
             "min_style_score", 0.90
         )
     )
+    allow_safety_review = bool(
+        (backend.get("anime_vision_review") or {}).get(
+            "allow_safety_review", True
+        )
+    )
     anime = json.loads(
         Path(args.anime_evaluation).read_text(encoding="utf-8")
     )["rows"]
@@ -108,7 +113,10 @@ def main() -> None:
         evidence = row["evidence"]
         decision = decide(evidence, policy)
         gate = anime_visual_gate(
-            decision, evidence, min_style_score=min_style
+            decision,
+            evidence,
+            min_style_score=min_style,
+            allow_safety_review=allow_safety_review,
         )
         if not gate["eligible"]:
             review = None

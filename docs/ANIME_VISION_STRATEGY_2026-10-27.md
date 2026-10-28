@@ -135,3 +135,33 @@ Label Studio 导入 120/120：
   场景 Prompt 域证据。
 - 训练脚本的图片根目录、标签清单和输出目录均由 CLI 参数配置，不依赖固定 Windows 盘符。
 - 视觉触发、域阈值和最大图片边长均可在 `backend/config.yaml` 调整。
+
+## 10. 参数优化对照（2026-10-28）
+
+虚拟视觉 Prompt 和输出 schema 保持不变。独立视觉模型使用：
+
+- `max_tokens=512`
+- `max_retries=1`
+- OpenAI-compatible JSON response mode
+- `thinking=disabled`
+- 显式检查 `finish_reason=length`
+
+DeepSeek JSON mode 会额外返回 `"type":"json_object"` 控制字段。解析器只精确移除这个
+字段，其他未知字段仍由 Pydantic 拒绝。
+
+8 张分层样本、1280/960 各一次，共 16 次调用全部成功：
+
+| 指标 | 结果 |
+|---|---:|
+| 1280 平均耗时 | 1371.9 ms |
+| 960 平均耗时 | 1340.1 ms |
+| `injury` 一致 | 8/8 |
+| `attack` 一致 | 8/8 |
+| `threat` 一致 | 8/8 |
+| `weapon_visible` 一致 | 7/8 |
+| `context` 一致 | 7/8 |
+| `appearance` 一致 | 8/8 |
+| `threat_basis` 一致 | 8/8 |
+
+差异只出现在武器可见性和 `game_ui/game_gameplay` 子类型。两张样本最终均为放行，
+但字段并非完全一致，因此默认分辨率继续使用 1280，960 只保留为实验参数。

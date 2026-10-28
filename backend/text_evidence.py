@@ -58,7 +58,9 @@ def assess_text_evidence(
     confidence_value = float(confidence) if isinstance(confidence, (int, float)) else None
     if char_count == 0:
         status = "empty"
-    elif char_count < 5 or confidence_value is None or confidence_value < 0.65:
+    elif char_count < 5 or (
+        confidence_value is not None and confidence_value < 0.65
+    ):
         status = "partial"
     else:
         status = "readable"

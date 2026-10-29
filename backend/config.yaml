@@ -62,6 +62,9 @@ decision_policy:
   binary_clear_margin: 0.05
   real_l1_relax_max_confidence: 0.65
   aggressive_anime_relaxation: true
+  risk_x_auto_allow: true
+  risk_x_prompt_margin_max: 0.015
+  semantic_food_relaxation: true
 audit:
   save_images: true
 
@@ -71,6 +74,9 @@ anime_vision_review:
   enabled: true
   max_side: 1280
   min_style_score: 0.90
+  real_context_enabled: false
+  real_context_trigger_threshold: 0.006
+  real_context_direct_violence_max: 0.65
   allow_safety_review: true
   max_tokens: 512
   max_retries: 1

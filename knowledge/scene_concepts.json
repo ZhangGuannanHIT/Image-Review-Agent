@@ -99,6 +99,17 @@
     "rag_ids": ["R010", "R013"]
   },
   {
+    "key": "authority_context",
+    "title": "军警执勤、训练或安保",
+    "kind": "safe_context",
+    "prompts": [
+      "警察巡逻、军队训练、安保执勤或检查站环境，没有攻击或伤害他人",
+      "police patrol, military training, security duty, or a checkpoint without attack or injury"
+    ],
+    "rag_query": "警察巡逻 军队训练 安保执勤 检查站 执法",
+    "rag_ids": ["R002", "R008", "R009"]
+  },
+  {
     "key": "red_paint_liquid",
     "title": "红色颜料、液体或抽象纹理",
     "kind": "confounder",

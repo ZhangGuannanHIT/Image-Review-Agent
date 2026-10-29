@@ -43,7 +43,7 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 
 填写两个文件中的 `api_key`：
 
-- `config/llm.yaml`：DeepSeek，用于条件式解释、文字语义复核和虚拟视觉证据复核。
+- `config/llm.yaml`：DeepSeek，用于条件式解释、文字语义复核和受限的结构化视觉证据复核。
 - `config/ocr.yaml`：默认使用本地 GLM-OCR，通过 `http://127.0.0.1:8080/v1/chat/completions`
   整图识别。阿里云和旧 GLM 云接口仅保留用于对照，不会自动回退。
 
@@ -89,7 +89,7 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 - `config/inference.yaml`：已标定的暴力类型、图像质量阈值。
 - `backend/config.yaml` → `features.llm_explanation_mode`：默认 `selective`。放行和限流使用程序固定模板；人工复核、下架才调用 LLM，并按固定 JSON 字段填写解释。
 - `backend/config.yaml` → `text_detection`：轻量文字检测参数；默认 `opencv_light`，无需模型权重。
-- `backend/config.yaml` → `anime_vision_review`：高置信虚拟内容，或“武器类型 + 游戏 UI Prompt”窄候选且动作非放行时调用视觉 LLM；非游戏语境保留原动作。
+- `backend/config.yaml` → `anime_vision_review`：高置信动漫或“武器类型 + 游戏 UI Prompt”窄候选可调用视觉 LLM。真实图片语义门控代码保留，但 `real_context_enabled=false`，默认不自动改变真实图片动作。
 - `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
 
 阿里云 OCR 配置见 [ALIYUN_OCR.md](docs/ALIYUN_OCR.md)。AppCode 只放在本地
@@ -127,7 +127,8 @@ knowledge/scene_concepts.json
 - binary head 负责“是否存在血腥”的校准判断；
 - 四分类 injury 继续负责轻微、中度、严重；
 - binary 明确阴性时否决血腥维度；若风险 L1/L2 没有独立攻击、威胁或文字支持，则按 `effective_risk` 区分真实冲突与风格假冲突；
-- 外部 LLM 识图默认关闭。
+- 真实图片的外部 LLM 语义放行默认关闭；
+- 动漫/游戏 UI 的结构化视觉复核按窄路由启用。
 
 训练、评估命令和最新指标见 [HARD_PROBE_2026-10-21.md](docs/HARD_PROBE_2026-10-21.md)。
 最终 180 张冻结盲测见 [SOLID_BLIND_2026-10-21.md](docs/SOLID_BLIND_2026-10-21.md)。
@@ -143,12 +144,23 @@ checkpoints/best/quality_fusion/
 严重模糊、文字扭曲和故意遮挡作为证据可靠性提示；`X_无法判定` 或内容证据冲突会触发人工复核。180 张质量探针、固定开发/盲测划分和最终指标见
 [QUALITY_PROBE_2026-10-22.md](docs/QUALITY_PROBE_2026-10-22.md)。
 
-当前策略版本为 `2026-10-26-effective-v5`：保留 `risk_raw`，由 binary、quality、
-场景 Prompt、OCR/RAG 和域证据生成独立的 `effective_risk`。AI 二次元假冲突可主动降级；
-真实域 L2、L3、X、近阈值、缺失分数和文字未完成仍需复核。
+当前策略接口版本标识为 `2026-10-26-effective-v5`，包含 2026-10-30 policy v2 修订：
+
+- 保留 `risk_raw`，由 binary、quality、场景 Prompt、OCR/RAG 和域证据生成独立的 `effective_risk`；
+- `risk_without_support` 默认改为保守限流；
+- `risk_X` 只在类型头、binary、质量、Prompt 与文字证据全部一致阴性时放行；
+- OCR 明确食物/酱汁语义可解除红色 L3 假冲突；
+- OCR 工具失败本身不再强制转人工；
+- 真实图片语义自动放行默认关闭；新闻执法、军警执勤和合法武器展示仅保留为可选实验路由；
+- 体育 Prompt 已移除，医学和体育不会触发真实图片视觉语义路由。
+
+2026-10-30 最终 447 张测试结果：444 张成功，合并人工标签更正后
+L0 自动误杀 11.46%，L1 自动放行 3.26%，L2–L6 动作放行 1.01%，
+总转人工 4.05%。
+详细汇总见项目根目录的 `WORK_SUMMARY_2026-10-29.md`。
 
 固定流程、域策略、冻结探针和已知限制见
 [EFFECTIVE_POLICY_V5_2026-10-26.md](docs/EFFECTIVE_POLICY_V5_2026-10-26.md)。
-虚拟风格路由与视觉触发见
+语义视觉路由与触发见
 [ANIME_VISION_STRATEGY_2026-10-27.md](docs/ANIME_VISION_STRATEGY_2026-10-27.md)。
 架构见 [architecture.md](docs/architecture.md)。

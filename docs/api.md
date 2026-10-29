@@ -247,10 +247,10 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - `analyze_image`（FG-CLIP2）必须成功执行。
 - `detect_text` 在 CLIP 后执行；高置信 L0 也不能跳过文字检测。
 - `ocr_image` 仅在文字检测命中或检测失败时执行，quality 不再单独触发 OCR。
-- OCR 只返回文字、坐标和置信度证据，不承担图片语义裁决。
+- OCR 只返回文字、坐标和置信度证据；新增 `content_profile` 仅用于区分普通文字与自由图片描述，不独立裁决动作。
 - RAG 默认启用；OCR 成功取得文本后检索本地规则与案例。可通过 `features.rag_enabled=false` 关闭。
-- LLM 不接收原始图片，只接收工具生成的文字证据。
-- 例外：高置信动漫路由且初步动作非放行时，可调用结构化视觉复核；真实域不调用。
+- 解释 LLM 不接收原始图片，只接收工具生成的文字证据。
+- 例外：高置信动漫或游戏 UI 窄路由可调用结构化视觉复核。真实图片语义路由代码保留，但 `real_context_enabled=false`，默认不调用。
 - 同一请求重复调用 CLIP 使用请求级缓存，不重复执行 GPU 推理。
 - 真实模式配置为 `lora=true`、`require_checkpoint=true`，必须加载训练后的 LoRA 和分类头；Mock 模式只用于流程演示。
 
@@ -263,7 +263,7 @@ curl -F "image=@path/to/test.jpg" http://localhost:8000/api/review
 - 一次真实链路为 `analyze_image → detect_text → OCR/RAG → 场景概念 → 策略 → LLM 解释`；
 - 阿里云高精版 OCR 的真实请求已成功；
 - RAG 已接入本地规则库，检索分数不是违规概率；最终处置沿用程序规则；
-- 自动化测试 177 项通过，覆盖固定流程、grounded 文字语义、动漫路由、视觉复核、策略、OCR、RAG 和解释回退；
+- 自动化测试 215 项通过，覆盖固定流程、grounded 文字语义、动漫路由、视觉复核、policy v2、OCR、RAG 和解释回退；
 - 上述后端内部变化没有修改前端请求字段和响应结构。
 
 ## 8. 前端联调检查表

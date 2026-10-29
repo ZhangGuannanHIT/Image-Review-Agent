@@ -31,6 +31,9 @@ def anime_visual_gate(
     evidence: dict[str, Any],
     *,
     min_style_score: float = 0.90,
+    real_context_enabled: bool = False,
+    real_context_trigger_threshold: float = 0.006,
+    real_context_direct_violence_max: float = 0.65,
     allow_safety_review: bool = False,
 ) -> dict[str, Any]:
     style = evidence.get("anime_style") or {}
@@ -51,17 +54,64 @@ def anime_visual_gate(
     game_ui_score = float(scene.get("game_ui_score") or -1.0)
     game_ui_matched = bool(scene.get("game_ui_matched"))
     type_labels = set((evidence.get("type") or {}).get("labels") or [])
+    direct_violence_score = float(
+        ((evidence.get("type") or {}).get("scores") or {}).get(
+            TYPE_CLASSES[1], 0.0
+        )
+    )
     weapon_signal = TYPE_CLASSES[3] in type_labels
     game_ui_route = bool(game_ui_matched and weapon_signal)
-    route_matched = bool(anime_route or game_ui_route)
+    safe_context_matches = [
+        item
+        for item in scene.get("safe_contexts", [])
+        if item.get("key") in {
+            "authority_context",
+            "news_legal_context",
+        }
+        and float(item.get("score", -1.0)) >= real_context_trigger_threshold
+    ]
+    harmless_weapon_matches = [
+        item
+        for item in scene.get("confounders", [])
+        if item.get("key") == "harmless_weapon"
+        and float(item.get("score", -1.0)) >= real_context_trigger_threshold
+    ]
+    real_context_keys = [
+        str(item.get("key"))
+        for item in safe_context_matches + harmless_weapon_matches
+    ]
+    real_context_direct_guard = bool(
+        direct_violence_score >= real_context_direct_violence_max
+    )
+    real_context_route = bool(
+        real_context_enabled
+        and not anime_route
+        and not game_ui_route
+        and real_context_keys
+        and not real_context_direct_guard
+        and decision.get("binary_state") == "clear_negative"
+        and decision.get("risk_raw") in RISK_CLASSES[1:4]
+        and decision.get("action") in {"limit", "review"}
+    )
+    route_matched = bool(anime_route or game_ui_route or real_context_route)
     # Keep the established anime route when both signals fire. The game-UI
     # prompt is a fallback for real-looking game screens, not a replacement
     # for an already matched virtual-style route.
-    route_source = anime_route_source if anime_route else "game_ui_prompt"
+    if anime_route:
+        route_source = anime_route_source
+    elif game_ui_route:
+        route_source = "game_ui_prompt"
+    else:
+        route_source = "real_context_prompt"
     reasons = []
     safety_signals: list[str] = []
     if not route_matched:
-        reasons.append("visual_route_not_matched")
+        if real_context_keys and not real_context_enabled:
+            reasons.append("real_context_disabled")
+        elif real_context_keys and real_context_direct_guard:
+            reasons.append("real_context_direct_violence_guard")
+        else:
+            reasons.append("visual_route_not_matched")
     action = decision.get("action")
     if action in {"limit", "review", "block"}:
         action_reviewable = True
@@ -104,6 +154,13 @@ def anime_visual_gate(
         "game_ui_score": game_ui_score,
         "game_ui_matched": game_ui_matched,
         "weapon_signal": weapon_signal,
+        "real_context_route": real_context_route,
+        "real_context_enabled": bool(real_context_enabled),
+        "real_context_keys": real_context_keys,
+        "real_context_trigger_threshold": real_context_trigger_threshold,
+        "real_context_direct_violence_score": direct_violence_score,
+        "real_context_direct_violence_max": real_context_direct_violence_max,
+        "real_context_direct_guard": real_context_direct_guard,
         "route_matched": route_matched,
         "action": decision.get("action"),
         "risk": decision.get("risk_raw"),
@@ -152,6 +209,10 @@ def reconcile_anime_visual(
         and threat != "present"
         and appearance == "cartoon"
     )
+    if trigger_route == "real_context_prompt" and context != "real_photo":
+        result["anime_visual_effect"] = "unchanged_non_real_context"
+        result["anime_visual_resolution"] = "keep"
+        return result
     if trigger_route == "game_ui_prompt" and not game_context:
         result["anime_visual_effect"] = "unchanged_non_game_context"
         result["anime_visual_resolution"] = "keep"
@@ -159,7 +220,7 @@ def reconcile_anime_visual(
     if (
         (game_context or fictional_action)
         and injury == "absent"
-        and threat != "present"
+        and threat == "absent"
     ):
         result.update(
             action="allow",
@@ -206,11 +267,6 @@ def reconcile_anime_visual(
         or injury == "uncertain"
         or appearance == "horror"
         or injury == "mild"
-        or (
-            weapon_visible == "present"
-            and context not in {"game_ui", "game_gameplay"}
-        )
-        or result.get("risk_raw") == RISK_CLASSES[3]
     ):
         result.update(
             action="limit",
@@ -218,7 +274,7 @@ def reconcile_anime_visual(
             level=RISK_CLASSES[1],
             uncertain=False,
             conflict_type="anime_visual_mild_boundary",
-            reason="动漫视觉复核未确认明确伤害、攻击或威胁，按 L1 限流且不转人工",
+            reason="语义视觉复核未确认明确伤害、攻击或威胁，按 L1 限流且不转人工",
         )
         _sync_recommendation(result, "limit")
         result["anime_visual_effect"] = "withdraw_to_l1"
@@ -231,7 +287,7 @@ def reconcile_anime_visual(
         level=RISK_CLASSES[0],
         uncertain=False,
         conflict_type="anime_visual_withdrawn",
-        reason="动漫视觉复核未见伤害、攻击或明确武器指向，撤回候选限流",
+        reason="语义视觉复核未见伤害、攻击或明确威胁，撤回候选限制",
     )
     _sync_recommendation(result, "allow")
     result["anime_visual_effect"] = "withdraw_to_allow"

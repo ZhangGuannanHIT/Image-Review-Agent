@@ -118,16 +118,15 @@ class EffectivePolicyTests(unittest.TestCase):
         result = decide(item, DecisionPolicy())
         self.assertEqual(result["action"], "limit")
 
-    def test_real_l2_without_independent_support_stays_review(self):
+    def test_real_l2_without_independent_support_falls_back_to_limit(self):
         item = evidence(2, 3, .6, [TYPE_CLASSES[0], TYPE_CLASSES[2]])
         item["blood_binary"] = binary(.02)
         item["scene_concepts"] = anime_scene(False)
         result = decide(item, DecisionPolicy())
-        self.assertEqual(result["action"], "review")
+        self.assertEqual(result["action"], "limit")
         self.assertEqual(result["risk_raw"], RISK_CLASSES[2])
-        self.assertEqual(result["recommended_action"], "limit")
-        self.assertTrue(result["review_hint"])
-        self.assertIn("建议", result["recommended_action_label"])
+        self.assertEqual(result["conflict_type"], "risk_without_support")
+        self.assertFalse(result["review_hint"])
 
     def test_review_with_severe_support_recommends_block_without_changing_action(self):
         item = evidence(3, 0, .8)
@@ -146,17 +145,14 @@ class EffectivePolicyTests(unittest.TestCase):
         self.assertEqual(result["action"], "allow")
         self.assertIn("真实域仅对低置信 L1", "".join(result["adjustments"]))
 
-    def test_real_l1_severe_blur_stays_review(self):
+    def test_real_l1_severe_blur_falls_back_to_conservative_limit(self):
         item = evidence(1, 1, .52)
         item["blood_binary"] = binary(.02)
         item["quality"]["labels"] = ["严重模糊"]
         item["scene_concepts"] = anime_scene(False)
         result = decide(item, DecisionPolicy())
-        self.assertEqual(result["action"], "review")
-        self.assertIn(
-            result["conflict_type"],
-            {"risk_without_support", "real_quality_unverified"},
-        )
+        self.assertEqual(result["action"], "limit")
+        self.assertEqual(result["conflict_type"], "risk_without_support")
 
     def test_real_l0_quality_warning_does_not_force_review(self):
         item = evidence(0, 0, .9)
@@ -183,14 +179,14 @@ class EffectivePolicyTests(unittest.TestCase):
         self.assertEqual(result["action"], "allow")
         self.assertIn("安全混淆项", "".join(result["adjustments"]))
 
-    def test_real_l2_scene_confounder_does_not_override_visual_risk(self):
+    def test_real_l2_scene_confounder_falls_back_to_conservative_limit(self):
         item = evidence(2, 2, .5, [TYPE_CLASSES[0], TYPE_CLASSES[2]])
         item["blood_binary"] = binary(.02)
         scene = anime_scene(False)
         scene["confounder_matched"] = True
         item["scene_concepts"] = scene
         result = decide(item, DecisionPolicy())
-        self.assertEqual(result["action"], "review")
+        self.assertEqual(result["action"], "limit")
 
     def test_ai_l3_never_downgrades_only_from_style_and_binary(self):
         item = evidence(3, 1, .9)
@@ -243,14 +239,80 @@ class EffectivePolicyTests(unittest.TestCase):
         self.assertEqual(result["action"], "limit")
         self.assertEqual(result["effective_risk"], RISK_CLASSES[2])
 
-    def test_detected_but_failed_ocr_cannot_allow(self):
+    def test_detected_but_failed_ocr_does_not_override_safe_action(self):
         item = evidence(0, 0, .9)
         item["blood_binary"] = binary(.0)
         item["text_detection"] = {"status": "detected", "has_text": True}
-        item["text_evidence"] = {"status": "failed", "high_risk_rule_ids": []}
+        item["text_evidence"] = {
+            "status": "failed",
+            "high_risk_rule_ids": [],
+            "content_profile": {},
+        }
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "allow")
+        self.assertEqual(result["conflict_type"], "none")
+
+    def test_risk_x_can_allow_when_all_independent_evidence_is_clear(self):
+        item = evidence(4, 0, .8, [TYPE_CLASSES[0]])
+        item["blood_binary"] = binary(.01)
+        item["quality"]["labels"] = ["清晰", "文字扭曲形变"]
+        scene = anime_scene(False)
+        scene["risk_matched"] = False
+        scene["risk_margin"] = 0.0
+        item["scene_concepts"] = scene
+        item["text_evidence"] = {
+            "status": "empty",
+            "grounded_violation": False,
+            "high_risk_rule_ids": [],
+            "content_profile": {},
+        }
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "allow")
+        self.assertEqual(result["conflict_type"], "risk_x_multievidence_safe")
+
+    def test_risk_x_stays_review_when_quality_is_occluded(self):
+        item = evidence(4, 0, .8, [TYPE_CLASSES[0]])
+        item["blood_binary"] = binary(.01)
+        item["quality"]["labels"] = ["故意遮挡（马赛克/黑条/贴纸）"]
+        scene = anime_scene(False)
+        scene["risk_matched"] = False
+        scene["risk_margin"] = 0.0
+        item["scene_concepts"] = scene
+        item["text_evidence"] = {
+            "status": "empty",
+            "grounded_violation": False,
+            "high_risk_rule_ids": [],
+            "content_profile": {},
+        }
         result = decide(item, DecisionPolicy())
         self.assertEqual(result["action"], "review")
-        self.assertEqual(result["conflict_type"], "ocr_failed_after_detection")
+        self.assertEqual(result["conflict_type"], "risk_x")
+
+    def test_red_liquid_semantic_match_can_release_l3_false_positive(self):
+        item = evidence(3, 0, .8, [TYPE_CLASSES[0]])
+        item["blood_binary"] = binary(.02)
+        scene = anime_scene(False)
+        scene["risk_matched"] = False
+        scene["confounders"] = [{
+            "key": "red_paint_liquid",
+            "title": "红色酱汁或颜料",
+            "score": 0.02,
+        }]
+        item["scene_concepts"] = scene
+        item["text_evidence"] = {
+            "status": "readable",
+            "grounded_violation": False,
+            "high_risk_rule_ids": [],
+            "semantic_review": {"verdict": "safe"},
+            "content_profile": {
+                "descriptive_caption": True,
+                "safe_food_scene": True,
+                "safe_red_liquid": True,
+            },
+        }
+        result = decide(item, DecisionPolicy())
+        self.assertEqual(result["action"], "allow")
+        self.assertEqual(result["conflict_type"], "red_liquid_semantic_match")
 
     def test_optional_visual_review_cannot_clear_unverified_text(self):
         item = evidence(0, 0, .9)
@@ -334,7 +396,7 @@ class EffectivePolicyTests(unittest.TestCase):
             "style_router",
         )
 
-    def test_style_router_can_keep_prompt_false_positive_out_of_anime_policy(self):
+    def test_style_router_false_positive_keeps_action_out_of_anime_policy(self):
         item = evidence(2, 3, .6, [TYPE_CLASSES[0], TYPE_CLASSES[2]])
         item["blood_binary"] = binary(.02)
         item["scene_concepts"] = anime_scene(True)
@@ -344,7 +406,7 @@ class EffectivePolicyTests(unittest.TestCase):
             "is_anime": False,
         }
         result = decide(item, DecisionPolicy())
-        self.assertEqual(result["action"], "review")
+        self.assertEqual(result["action"], "limit")
 
 
 class ImageHelpers:

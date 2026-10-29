@@ -54,7 +54,7 @@ TIMING_LABELS = {
     "policy.build_evidence": ("证据包整理", "policy"),
     "policy.decision": ("有效风险裁决", "policy"),
     "policy.anime_gate": ("虚拟视觉门控", "policy"),
-    "policy.anime_visual": ("虚拟视觉复核", "model"),
+    "policy.anime_visual": ("语义视觉复核", "model"),
     "explanation": ("LLM 解释生成", "model"),
     "compose": ("最终建议组装", "policy"),
     "service.total": ("后端总处理", "service"),
@@ -539,7 +539,7 @@ def _anime_visual_tool(log: dict[str, Any], timings: dict[str, Any]) -> dict[str
     if not gate:
         return _tool(
             "anime_visual_review",
-            "虚拟视觉证据复核",
+            "语义视觉证据复核",
             status="not_available",
             outcome="not_applicable",
             summary="未生成虚拟视觉门控结果",
@@ -547,7 +547,7 @@ def _anime_visual_tool(log: dict[str, Any], timings: dict[str, Any]) -> dict[str
     if not gate.get("eligible"):
         return _tool(
             "anime_visual_review",
-            "虚拟视觉证据复核",
+            "语义视觉证据复核",
             status="skipped",
             outcome="not_applicable",
             summary=f"门控未通过：{gate.get('reason', 'unknown')}",
@@ -556,7 +556,7 @@ def _anime_visual_tool(log: dict[str, Any], timings: dict[str, Any]) -> dict[str
     if not isinstance(review, dict):
         return _tool(
             "anime_visual_review",
-            "虚拟视觉证据复核",
+            "语义视觉证据复核",
             status="not_available",
             outcome="unknown",
             summary="满足门控，但本次没有可用的视觉模型结果",
@@ -566,7 +566,7 @@ def _anime_visual_tool(log: dict[str, Any], timings: dict[str, Any]) -> dict[str
     if status != "ok":
         return _tool(
             "anime_visual_review",
-            "虚拟视觉证据复核",
+            "语义视觉证据复核",
             status="failed",
             outcome="unknown",
             summary="视觉模型调用失败，保留程序原动作",
@@ -586,7 +586,7 @@ def _anime_visual_tool(log: dict[str, Any], timings: dict[str, Any]) -> dict[str
     outcome = "risk" if risky else ("mixed" if uncertain else "safe")
     return _tool(
         "anime_visual_review",
-        "虚拟视觉证据复核",
+        "语义视觉证据复核",
         status="ok",
         outcome=outcome,
         summary="；".join(

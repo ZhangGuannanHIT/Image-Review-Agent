@@ -8,7 +8,8 @@ from PIL import Image
 from backend.mock import MockOCRClient
 from backend.policy import DecisionPolicy, decide
 from backend.text_evidence import (
-    assess_text_evidence, build_decision_evidence, collect_knowledge_hits,
+    assess_text_evidence, build_decision_evidence, classify_ocr_content,
+    collect_knowledge_hits,
 )
 from backend.tools import (
     build_tools, is_l0_without_conflict, reset_current_image, set_current_image,
@@ -81,6 +82,26 @@ class TextEvidenceTests(unittest.TestCase):
             "mean_confidence": None,
         })
         self.assertEqual(result["status"], "readable")
+
+    def test_local_ocr_caption_is_identified_separately_from_literal_text(self):
+        caption = classify_ocr_content(
+            "The image shows a bowl of tomato sauce and red paint."
+        )
+        self.assertTrue(caption["descriptive_caption"])
+        self.assertTrue(caption["safe_food_scene"])
+        self.assertTrue(caption["safe_red_liquid"])
+
+        literal = classify_ocr_content("POLICE")
+        self.assertFalse(literal["descriptive_caption"])
+        self.assertFalse(literal["safe_food_scene"])
+
+    def test_food_caption_is_not_safe_when_it_describes_visible_harm(self):
+        caption = classify_ocr_content(
+            "The image shows blood on a plate during an attack."
+        )
+        self.assertTrue(caption["descriptive_caption"])
+        self.assertFalse(caption["safe_food_scene"])
+        self.assertFalse(caption["safe_red_liquid"])
 
     def test_readable_text_gets_rag_rules(self):
         result = assess_text_evidence(

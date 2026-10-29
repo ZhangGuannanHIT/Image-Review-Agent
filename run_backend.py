@@ -182,6 +182,21 @@ def main():
                 "min_style_score", 0.90
             )
         ),
+        real_context_visual_enabled=bool(
+            cfg.get("anime_vision_review", {}).get(
+                "real_context_enabled", False
+            )
+        ),
+        real_context_visual_trigger_threshold=float(
+            cfg.get("anime_vision_review", {}).get(
+                "real_context_trigger_threshold", 0.006
+            )
+        ),
+        real_context_direct_violence_max=float(
+            cfg.get("anime_vision_review", {}).get(
+                "real_context_direct_violence_max", 0.65
+            )
+        ),
         anime_visual_allow_safety_review=bool(
             cfg.get("anime_vision_review", {}).get(
                 "allow_safety_review", True

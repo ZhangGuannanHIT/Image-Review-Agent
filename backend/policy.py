@@ -16,6 +16,9 @@ class DecisionPolicy:
     # conservative so the AI-style policy cannot silently affect real photos.
     real_l1_relax_max_confidence: float = 0.65
     aggressive_anime_relaxation: bool = True
+    risk_x_auto_allow: bool = True
+    risk_x_prompt_margin_max: float = 0.015
+    semantic_food_relaxation: bool = True
 
     def __post_init__(self):
         for value in (
@@ -23,11 +26,17 @@ class DecisionPolicy:
             self.min_injury_margin,
             self.binary_clear_margin,
             self.real_l1_relax_max_confidence,
+            self.risk_x_prompt_margin_max,
         ):
             if not math.isfinite(value) or not 0 <= value <= 1:
                 raise ValueError("处置门槛必须位于 [0, 1]")
-        if not isinstance(self.aggressive_anime_relaxation, bool):
-            raise ValueError("aggressive_anime_relaxation 必须是布尔值")
+        for name in (
+            "aggressive_anime_relaxation",
+            "risk_x_auto_allow",
+            "semantic_food_relaxation",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} 必须是布尔值")
 
 
 def _rank(task, classes):
@@ -138,11 +147,15 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
         text_detection.get("has_text")
         or text_detection.get("status") == "detected"
     )
-    text_failed = text_detected and text_status == "failed"
     image_risk_indicator = bool(
         active or binary_supported or risk in RISK_CLASSES[1:4]
     )
     scene_safe_context = bool(scene_evidence.get("safe_context_matched"))
+    scene_risk_matched = bool(scene_evidence.get("risk_matched"))
+    try:
+        scene_risk_margin = float(scene_evidence.get("risk_margin", 1.0))
+    except (TypeError, ValueError):
+        scene_risk_margin = 1.0
     scene_safe_keys = {
         str(item.get("key", ""))
         for item in scene_evidence.get("safe_contexts", [])
@@ -172,6 +185,36 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
     )
     editorial_mitigation = bool(
         {"严重模糊", "故意遮挡（马赛克/黑条/贴纸）"} & set(quality_labels)
+    )
+    content_profile = text_evidence.get("content_profile", {}) or {}
+    safe_food_caption = bool(content_profile.get("safe_food_scene"))
+    red_liquid_prompt = any(
+        item.get("key") == "red_paint_liquid"
+        for item in scene_evidence.get("confounders", [])
+    )
+    semantic_verdict = str(semantic_review.get("verdict", ""))
+    text_threat_absent = bool(
+        not text_high_risk
+        and not text_evidence.get("grounded_violation")
+        and semantic_verdict != "violation"
+        and (
+            semantic_verdict == "safe"
+            or (not text_detected and text_status in {"empty", "not_available"})
+        )
+    )
+    risk_x_prompt_clear = bool(
+        scene_evidence
+        and not scene_risk_matched
+        and math.isfinite(scene_risk_margin)
+        and scene_risk_margin <= policy.risk_x_prompt_margin_max
+    )
+    risk_x_safe = bool(
+        policy.risk_x_auto_allow
+        and set(selected) == {TYPE_CLASSES[0]}
+        and binary_state == "clear_negative"
+        and not editorial_mitigation
+        and risk_x_prompt_clear
+        and text_threat_absent
     )
     news_shell_suspect = bool(
         safe_context_confirmed
@@ -239,9 +282,18 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
         action, uncertain = "limit", False
         reason = "OCR 原文逐字证据或窄条件规则确认文字威胁，独立支持限流"
     elif risk == RISK_CLASSES[4]:
-        action, uncertain = "review", False
-        reason = "风险头最高候选为 X，图片内容无法可靠判定，需要人工复核"
-        conflict_type = "risk_x"
+        if risk_x_safe:
+            action, uncertain = "allow", False
+            conflict_type = "risk_x_multievidence_safe"
+            reason = (
+                "风险头为 X，但无暴力类型、binary 明确阴性、质量可用、"
+                "常规违规 Prompt 未命中且 OCR/RAG 未发现威胁，按 L0 输出"
+            )
+            adjustments.append("Risk X 由多证据一致阴性裁决为 L0")
+        else:
+            action, uncertain = "review", False
+            reason = "风险头最高候选为 X，且多证据一致性条件未全部满足，需要人工复核"
+            conflict_type = "risk_x"
     elif binary_state == "positive":
         if injury == INJURY_CLASSES[3] and risk == RISK_CLASSES[3]:
             action, uncertain = "block", False
@@ -264,8 +316,26 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
             uncertain = False
             reason = "binary 阴性只否决血腥维度，独立暴力类型仍支持处置"
         elif risk == RISK_CLASSES[3]:
-            action, uncertain, conflict_type = "review", False, "severe_without_content"
-            reason = "风险头为 L3，但 binary 明确阴性和独立内容证据不足，不能自动降级"
+            safe_food_evidence = bool(
+                policy.semantic_food_relaxation
+                and safe_food_caption
+                and red_liquid_prompt
+                and not scene_risk_matched
+                and binary_state == "clear_negative"
+                and not has_independent_violence
+                and text_threat_absent
+            )
+            if safe_food_evidence:
+                action, uncertain = "allow", False
+                conflict_type = "red_liquid_semantic_match"
+                reason = (
+                    "风险头为 L3，但 OCR 语义明确描述食物/酱汁场景，"
+                    "红色液体 Prompt 命中且 binary 明确阴性，按 L0 输出"
+                )
+                adjustments.append("OCR 图片语义与安全红色液体场景共同解除严重风险候选")
+            else:
+                action, uncertain, conflict_type = "review", False, "severe_without_content"
+                reason = "风险头为 L3，但 binary 明确阴性和独立内容证据不足，不能自动降级"
         elif risk in RISK_CLASSES[1:3]:
             if (
                 anime_relaxation
@@ -292,8 +362,10 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
                 if safe_context_confirmed:
                     adjustments.append("场景 Prompt 与 OCR/RAG 共同确认安全语境")
             else:
-                action, uncertain, conflict_type = "review", False, "risk_without_support"
-                reason = "binary 阴性后风险候选缺少独立内容支持，域证据不足以自动降级"
+                action, uncertain = "limit", False
+                conflict_type = "risk_without_support"
+                reason = "binary 明确阴性，但风险头仍非 L0 且缺少可放行的独立支持，采用保守限流"
+                adjustments.append("风险候选无法自动解除，转人工改为保守限流")
         elif risk == RISK_CLASSES[0]:
             action, uncertain = "allow", False
             reason = "风险头为 L0，binary 明确阴性且无独立违规支持"
@@ -317,7 +389,7 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
 
     text_unverified = bool(
         text_detected
-        and text_status in {"not_available", "failed"}
+        and text_status == "not_available"
     )
     real_quality_guard = bool(
         not anime_matched
@@ -388,11 +460,7 @@ def decide(evidence: dict, policy: DecisionPolicy, vision: dict | None = None) -
                 reason = "视觉复核请求未完成，未取得有效的血腥复核结论"
     # Optional image review must not bypass unresolved text or known context
     # hazards. Reapply these guards after the review reconciliation.
-    if text_failed and action != "block":
-        action, uncertain = "review", False
-        conflict_type = "ocr_failed_after_detection"
-        reason = "文字检测发现候选区域，但 OCR 失败，不能据此确认安全"
-    elif text_unverified and action == "allow":
+    if text_unverified and action == "allow":
         action, uncertain = "review", False
         conflict_type = "ocr_not_completed"
         reason = "文字检测发现候选区域，但本次没有可用的 OCR 结论"

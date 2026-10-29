@@ -1,14 +1,16 @@
-# 动漫专用策略与 LLM 视觉复核（2026-10-27）
+# 语义视觉策略与 LLM 复核（2026-10-30）
 
 ## 1. 分流结构
 
 ```text
-FG-CLIP2 + binary + quality
+FG-CLIP2 + binary + quality + OCR/RAG
   → anime style router
-      ├─ 真实/低置信：现有真实策略，不调用动漫视觉
+      ├─ 真实/低置信：现有真实策略，不启用真实语义自动放行
       └─ 高置信动漫：effective risk
            ├─ allow：直接放行
            └─ limit/review/block：条件触发 LLM 视觉复核
+  → game_ui_weapon_display 窄候选可补充视觉路由
+  → 真实图片语义实验代码保留，但默认 disabled
 ```
 
 风格路由 checkpoint：
@@ -62,6 +64,14 @@ checkpoints/anime_style_router/
 - 没有 grounded 文字违规；
 - 高风险 RAG 命中没有被文字语义复核判为 safe。
 
+2026-10-30 起：
+
+- `sports_context` 已移除；
+- `medical_context` 不触发真实视觉；
+- `news_legal_context`、`authority_context`、`harmless_weapon` 的真实语义路由保留为实验；
+- `real_context_enabled=false`，默认不调用真实图片视觉模型；
+- 实验启用时，直接暴力类型分数 `>=0.65` 仍禁止视觉撤回。
+
 动作是 `allow` 时只在既有安全信号下触发。普通真实图不会仅因风格为 real 触发；
 但 3D 游戏界面可能在 style router 中被判为 real，因此允许游戏 UI 候选旁路该判断。
 该旁路只增加视觉复核，不直接改变动作；视觉返回非游戏语境时保留原动作。
@@ -100,12 +110,14 @@ LLM 不能返回最终动作。
 
 | 视觉证据 | 程序结果 |
 |---|---|
-| 明确游戏语境，无 injury，无 threat | allow |
+| 明确游戏语境，injury/attack/threat 均为 absent | allow |
 | 动画虚构语境，仅 attack，无 injury/threat | allow |
-| 只有 weapon_visible，非游戏语境 | L1 limit |
+| 真实语境实验启用，context=real_photo 且三关系全 absent | allow |
+| 只有 weapon_visible，attack/threat=absent | 不再单独采用 L1 |
 | injury mild / uncertain、attack/threat/weapon uncertain | L1 limit，不转人工 |
 | 暗黑/horror 风格且无明确伤害关系 | L1 limit |
 | injury moderate/severe、attack present、threat present | 保留原动作 |
+| threat=uncertain | 不允许按游戏语境直接撤回 |
 | grounded 文字违规 | 不撤回原动作 |
 | 视觉调用失败或 JSON 无效 | 保留原动作 |
 
@@ -136,6 +148,16 @@ LLM 不能返回最终动作。
   保持 L2 limit；
 - 新增真实域违规自动放行：0。
 
+2026-10-30 policy v2 最终端到端：
+
+- 447 张尝试，444 张成功，3 张 AVIF 格式拒绝；
+- 语义视觉调用 159 次，159 次成功；
+- 真实图片语义自动放行关闭；
+- 合并 13 张人工标签更正后，虚拟安全图自动误杀为 5/105，剩余 5 张均为风格分未过 0.90；
+- 总转人工从 51/444 降到 18/444；
+- 视觉漂移样本 `40` 两次返回分别为 injury=mild 和 injury=absent；
+- 单次视觉关系结果不能稳定覆盖高置信血腥/后果模型头，是下一步必须解决的稳定性问题。
+
 ## 7. 已确认标注
 
 Label Studio 导入 120/120：
@@ -153,6 +175,7 @@ Label Studio 导入 120/120：
 - 未对 360 张全量执行外部视觉模型，171 次调用的费用/延迟未测；
 - 提示词对罕见武器关系、极端遮挡和真实 AI 出血仍需扩展测试；
 - 视觉模型失败时不会撤回候选，因此不会降低安全底线，但可能继续偏保守。
+- 视觉模型可能在相同输入上输出漂移，需研究多采样一致性或模型头冲突保护。
 
 ## 9. 可移植性
 

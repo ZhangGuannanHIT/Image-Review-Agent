@@ -56,6 +56,9 @@ class InferenceConfigTests(unittest.TestCase):
         review = backend["anime_vision_review"]
         self.assertTrue(review["enabled"])
         self.assertEqual(float(review["min_style_score"]), 0.90)
+        self.assertFalse(review["real_context_enabled"])
+        self.assertEqual(float(review["real_context_trigger_threshold"]), 0.006)
+        self.assertEqual(float(review["real_context_direct_violence_max"]), 0.65)
         self.assertTrue(review["allow_safety_review"])
         self.assertGreaterEqual(int(review["max_tokens"]), 300)
         self.assertLessEqual(int(review["max_tokens"]), 512)

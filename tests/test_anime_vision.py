@@ -22,6 +22,7 @@ def decision(action="limit"):
         "effective_risk": RISK_CLASSES[2],
         "level": RISK_CLASSES[2],
         "uncertain": False,
+        "binary_state": "clear_negative",
         "conflict_type": "risk_without_support",
         "reason": "候选",
     }
@@ -127,6 +128,100 @@ class AnimeVisionTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertIn("visual_route_not_matched", result["reason"])
 
+    def test_real_context_route_is_disabled_by_default(self):
+        item = evidence(score=0.05)
+        item["scene_concepts"] = {
+            "safe_context_matched": True,
+            "safe_contexts": [{
+                "key": "authority_context",
+                "title": "警方执勤",
+                "score": 0.02,
+            }],
+            "confounders": [],
+        }
+        result = anime_visual_gate(decision(), item)
+        self.assertFalse(result["eligible"])
+        self.assertFalse(result["real_context_route"])
+        self.assertEqual(result["reason"], "real_context_disabled")
+
+    def test_real_authority_context_can_use_optional_semantic_review(self):
+        item = evidence(score=0.05)
+        item["scene_concepts"] = {
+            "safe_context_matched": True,
+            "safe_contexts": [{
+                "key": "authority_context",
+                "title": "警方执勤",
+                "score": 0.02,
+            }],
+            "confounders": [],
+        }
+        result = anime_visual_gate(
+            decision(), item, real_context_enabled=True
+        )
+        self.assertTrue(result["eligible"])
+        self.assertTrue(result["real_context_route"])
+        self.assertEqual(result["route_source"], "real_context_prompt")
+        self.assertEqual(result["real_context_keys"], ["authority_context"])
+
+    def test_real_harmless_weapon_prompt_can_enter_narrow_review(self):
+        item = evidence(score=0.05)
+        item["scene_concepts"] = {
+            "safe_contexts": [],
+            "confounders": [{
+                "key": "harmless_weapon",
+                "title": "合法展示武器",
+                "score": 0.02,
+            }],
+        }
+        result = anime_visual_gate(
+            decision("review"), item, real_context_enabled=True
+        )
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["route_source"], "real_context_prompt")
+
+    def test_real_context_requires_clear_negative_binary(self):
+        item = evidence(score=0.05)
+        item["scene_concepts"] = {
+            "safe_contexts": [{
+                "key": "authority_context",
+                "title": "警方执勤",
+                "score": 0.02,
+            }],
+            "confounders": [],
+        }
+        item["blood_binary"] = {"state": "positive"}
+        unknown_binary = decision()
+        unknown_binary["binary_state"] = "unknown"
+        self.assertFalse(anime_visual_gate(
+            unknown_binary, item, real_context_enabled=True
+        )["eligible"])
+
+    def test_real_context_cannot_override_high_confidence_direct_violence(self):
+        item = evidence(score=0.05)
+        item["type"] = {
+            "labels": [TYPE_CLASSES[1]],
+            "scores": {
+                TYPE_CLASSES[0]: 0.2,
+                TYPE_CLASSES[1]: 0.74,
+                TYPE_CLASSES[2]: 0.02,
+                TYPE_CLASSES[3]: 0.04,
+            },
+        }
+        item["scene_concepts"] = {
+            "safe_contexts": [{
+                "key": "authority_context",
+                "title": "警方执勤",
+                "score": 0.02,
+            }],
+            "confounders": [],
+        }
+        result = anime_visual_gate(
+            decision(), item, real_context_enabled=True
+        )
+        self.assertFalse(result["eligible"])
+        self.assertTrue(result["real_context_direct_guard"])
+        self.assertIn("real_context_direct_violence_guard", result["reason"])
+
     def test_allow_safety_gate_uses_elevated_risk_quality_or_binary(self):
         elevated = anime_visual_gate(
             decision("allow"),
@@ -168,12 +263,12 @@ class AnimeVisionTests(unittest.TestCase):
         self.assertEqual(result["action"], "allow")
         self.assertEqual(result["effective_risk"], RISK_CLASSES[0])
 
-    def test_original_l3_with_absent_visual_evidence_stays_l1(self):
+    def test_original_l3_with_all_three_relations_absent_can_allow(self):
         item = decision()
         item["risk_raw"] = RISK_CLASSES[3]
         result = reconcile_anime_visual(item, evidence(), visual())
-        self.assertEqual(result["action"], "limit")
-        self.assertEqual(result["effective_risk"], RISK_CLASSES[1])
+        self.assertEqual(result["action"], "allow")
+        self.assertEqual(result["effective_risk"], RISK_CLASSES[0])
 
     def test_horror_style_without_relation_remains_l1(self):
         result = reconcile_anime_visual(
@@ -206,12 +301,22 @@ class AnimeVisionTests(unittest.TestCase):
         self.assertEqual(result["action"], "limit")
         self.assertEqual(result["effective_risk"], RISK_CLASSES[1])
 
-    def test_weapon_visible_without_threat_remains_l1(self):
+    def test_weapon_visible_without_attack_or_threat_can_allow(self):
         result = reconcile_anime_visual(
             decision(), evidence(), visual(weapon_visible="present")
         )
+        self.assertEqual(result["action"], "allow")
+        self.assertEqual(result["effective_risk"], RISK_CLASSES[0])
+
+    def test_game_context_with_uncertain_threat_does_not_withdraw(self):
+        result = reconcile_anime_visual(
+            decision(),
+            evidence(),
+            visual(context="game_gameplay", threat="uncertain"),
+        )
         self.assertEqual(result["action"], "limit")
         self.assertEqual(result["effective_risk"], RISK_CLASSES[1])
+        self.assertEqual(result["anime_visual_effect"], "withdraw_to_l1")
 
     def test_game_weapon_display_without_relation_can_allow(self):
         result = reconcile_anime_visual(
@@ -257,6 +362,20 @@ class AnimeVisionTests(unittest.TestCase):
             decision(), item_evidence, visual(attack="present")
         )
         self.assertEqual(result["action"], "allow")
+
+    def test_real_context_absent_relations_can_allow(self):
+        item = visual(context="real_photo")
+        item["trigger_route"] = "real_context_prompt"
+        result = reconcile_anime_visual(decision(), evidence(score=0.05), item)
+        self.assertEqual(result["action"], "allow")
+        self.assertEqual(result["effective_risk"], RISK_CLASSES[0])
+
+    def test_real_context_route_is_rejected_if_visual_domain_disagrees(self):
+        item = visual(context="illustration")
+        item["trigger_route"] = "real_context_prompt"
+        result = reconcile_anime_visual(decision(), evidence(score=0.05), item)
+        self.assertEqual(result["action"], "limit")
+        self.assertEqual(result["anime_visual_effect"], "unchanged_non_real_context")
 
     def test_attack_does_not_withdraw_anime_restriction(self):
         result = reconcile_anime_visual(

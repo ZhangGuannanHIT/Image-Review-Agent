@@ -10,6 +10,65 @@ from typing import Any, Callable
 
 HIGH_RISK_RULE_IDS = {"R001", "R002", "R003", "R004", "R005", "R006", "R007", "R015"}
 SAFE_CONTEXT_RULE_IDS = {"R009", "R010", "R011", "R013"}
+IMAGE_DESCRIPTION_MARKERS = (
+    "the image shows",
+    "the image depicts",
+    "this image shows",
+    "in the image",
+    "the picture shows",
+    "画面中",
+    "图中",
+    "这张图",
+)
+SAFE_FOOD_TERMS = (
+    "sauce",
+    "soup",
+    "stew",
+    "tomato",
+    "ketchup",
+    "food",
+    "bowl",
+    "plate",
+    "meal",
+    "酱汁",
+    "番茄酱",
+    "番茄",
+    "汤",
+    "食物",
+    "餐盘",
+    "碗",
+)
+RED_LIQUID_TERMS = (
+    "red sauce",
+    "red liquid",
+    "red paint",
+    "tomato",
+    "ketchup",
+    "红色酱汁",
+    "番茄酱",
+    "红色液体",
+    "红色颜料",
+)
+VISUAL_HARM_TERMS = (
+    "blood",
+    "wound",
+    "gore",
+    "injury",
+    "corpse",
+    "dead body",
+    "murder",
+    "attack",
+    "weapon",
+    "knife",
+    "gun",
+    "血迹",
+    "伤口",
+    "尸",
+    "攻击",
+    "武器",
+    "刀",
+    "枪",
+)
 
 
 def _normalized_text(texts: list[Any]) -> str:
@@ -20,6 +79,27 @@ def _normalized_text(texts: list[Any]) -> str:
 
 def _alnum_count(text: str) -> int:
     return len(re.findall(r"[0-9A-Za-z\u4e00-\u9fff]", text))
+
+
+def classify_ocr_content(text: str) -> dict[str, Any]:
+    """Distinguish literal-looking OCR output from GLM's image captions."""
+    normalized = text.casefold()
+    descriptive = bool(
+        any(marker in normalized for marker in IMAGE_DESCRIPTION_MARKERS)
+    )
+    safe_food = bool(
+        any(term in normalized for term in SAFE_FOOD_TERMS)
+        and not any(term in normalized for term in VISUAL_HARM_TERMS)
+    )
+    safe_red_liquid = bool(
+        safe_food
+        and any(term in normalized for term in RED_LIQUID_TERMS)
+    )
+    return {
+        "descriptive_caption": descriptive,
+        "safe_food_scene": safe_food,
+        "safe_red_liquid": safe_red_liquid,
+    }
 
 
 def assess_text_evidence(
@@ -37,6 +117,7 @@ def assess_text_evidence(
             "high_risk_rule_ids": [],
             "safe_context_rule_ids": [],
             "knowledge_hits": [],
+            "content_profile": classify_ocr_content(""),
         }
     if not ocr.get("success"):
         return {
@@ -49,6 +130,7 @@ def assess_text_evidence(
             "safe_context_rule_ids": [],
             "knowledge_hits": [],
             "error": ocr.get("error"),
+            "content_profile": classify_ocr_content(""),
         }
 
     texts = ocr.get("texts", []) or []
@@ -96,6 +178,7 @@ def assess_text_evidence(
         "high_risk_rule_ids": high_risk,
         "safe_context_rule_ids": safe_context,
         "knowledge_hits": compact_hits,
+        "content_profile": classify_ocr_content(text),
     }
 
 

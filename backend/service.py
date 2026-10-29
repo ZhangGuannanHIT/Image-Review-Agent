@@ -63,6 +63,9 @@ class ReviewService:
         anime_visual_reviewer: Any = None,
         anime_visual_enabled: bool = False,
         anime_visual_min_style_score: float = 0.90,
+        real_context_visual_enabled: bool = False,
+        real_context_visual_trigger_threshold: float = 0.006,
+        real_context_direct_violence_max: float = 0.65,
         anime_visual_allow_safety_review: bool = False,
         record_store: Any = None,
     ):
@@ -79,6 +82,13 @@ class ReviewService:
         self.anime_visual_reviewer = anime_visual_reviewer
         self.anime_visual_enabled = bool(anime_visual_enabled)
         self.anime_visual_min_style_score = float(anime_visual_min_style_score)
+        self.real_context_visual_enabled = bool(real_context_visual_enabled)
+        self.real_context_visual_trigger_threshold = float(
+            real_context_visual_trigger_threshold
+        )
+        self.real_context_direct_violence_max = float(
+            real_context_direct_violence_max
+        )
         self.anime_visual_allow_safety_review = bool(
             anime_visual_allow_safety_review
         )
@@ -348,6 +358,13 @@ class ReviewService:
             decision,
             evidence,
             min_style_score=self.anime_visual_min_style_score,
+            real_context_enabled=self.real_context_visual_enabled,
+            real_context_trigger_threshold=(
+                self.real_context_visual_trigger_threshold
+            ),
+            real_context_direct_violence_max=(
+                self.real_context_direct_violence_max
+            ),
             allow_safety_review=self.anime_visual_allow_safety_review,
         )
         timings["policy.anime_gate"] = round(

@@ -58,7 +58,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
           { id: 'text_semantic_rag', label: '文字语义与 RAG', status: 'uncertain', status_label: '不确定', outcome: 'mixed', outcome_label: '证据冲突', summary: '文字语义无法可靠确认', duration_ms: 1800, details: { high_risk_rule_ids: ['R006'] } }
         ] },
         { id: 'branch_policy', label: '分支与最终裁决', description: '复核和程序动作。', tools: [
-          { id: 'anime_visual_review', label: '虚拟视觉证据复核', status: 'skipped', status_label: '已跳过', outcome: 'not_applicable', outcome_label: '不适用', summary: '门控未通过', duration_ms: null, details: { gate: { eligible: false } } },
+          { id: 'anime_visual_review', label: '语义视觉证据复核', status: 'skipped', status_label: '已跳过', outcome: 'not_applicable', outcome_label: '不适用', summary: '门控未通过', duration_ms: null, details: { gate: { eligible: false } } },
           { id: 'effective_policy', label: '有效风险与最终裁决', status: 'ok', status_label: '已完成', outcome: 'mixed', outcome_label: '证据冲突', summary: 'L2 → L1；最终动作 人工复核', duration_ms: 1, details: {} },
           { id: 'explanation', label: 'LLM 解释生成', status: 'template', status_label: '程序模板', outcome: 'neutral', outcome_label: '中性证据', summary: '未调用 LLM，由程序固定模板直接生成说明', duration_ms: null, details: { source: 'program_template' } }
         ] }

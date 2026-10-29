@@ -1,10 +1,10 @@
 # 违规内容审核系统架构
 
-> 当前架构：FG-CLIP2 证据 + 固定条件式工具流程 + effective risk 策略 + 无工具解释 LLM。
+> 当前架构：FG-CLIP2 证据 + 固定条件式工具流程 + effective risk policy v2 + 受限语义视觉 LLM。
 
 ## 1. 系统边界
 
-系统接收一张图片，返回审核编号和面向运营的建议。FG-CLIP2 提供通用视觉证据；OCR、RAG 和场景 Prompt 补充语境；程序完成最终动作；LLM 只生成解释，不能改变动作。
+系统接收一张图片，返回审核编号和面向运营的建议。FG-CLIP2 提供通用视觉证据；OCR、RAG 和场景 Prompt 补充语境；动漫/游戏 UI 窄路由可调用结构化视觉 LLM；程序始终锁定最终动作。
 
 ## 2. 固定流程
 
@@ -25,8 +25,10 @@ flowchart TD
     BINARY --> POLICY
     QUALITY --> POLICY
     POLICY --> ACTION[allow / limit / review / block]
-    ACTION -->|high-confidence anime and non-allow| AVIS[anime visual evidence review]
+    ACTION -->|high-confidence anime or narrow game UI and non-allow| AVIS[structured visual evidence review]
     AVIS --> POLICY2[program reconciliation]
+    ACTION -->|real semantic experiment, disabled by default| RVIS[real-context visual review]
+    RVIS --> POLICY2
     POLICY2 --> ACTION
     ACTION -->|allow / limit| TEMPLATE[program explanation template]
     ACTION -->|review / block| EXPLAIN[fixed-schema LLM explanation]
@@ -124,8 +126,11 @@ p <= threshold-clear_margin            clear_negative
 - binary 阴性只否决血腥支持，不删除独立攻击、威胁或文字证据；
 - risk L1/L2 + binary clear negative + 无独立内容支持，才可能进入假冲突降级；
 - 动漫/插画域 Prompt、动漫域质量异常、已确认安全语境和场景混淆项可解释假冲突；
-- 真实域只对低置信 L1 做窄口径放宽，真实 L2 保留复核；
-- L3、X、分数缺失、行为冲突、binary 近阈值和 OCR 未完成均保留复核；
+- 真实图片语义自动放行默认关闭；
+- `risk_without_support` 无法解除时采用保守限流；
+- `risk_X` 只有在类型头、binary、质量、场景 Prompt 和 OCR/RAG 全部一致阴性时放行；
+- L3 只有在 OCR 安全食物/酱汁语义、红色液体 Prompt、binary 阴性和无独立暴力同时成立时走窄放行；
+- 分数缺失、行为冲突、binary 近阈值和 OCR 未完成仍保留复核；
 - 安全语境最多把下架降为限流；
 - RAG 高风险命中本身不直接限流；必须由逐字 quote 或窄条件规则确认。
   若语义复核无法给出 safe 或 grounded violation，则进入人工核对。
@@ -133,14 +138,14 @@ p <= threshold-clear_margin            clear_negative
 
 详细口径和冻结探针见 [EFFECTIVE_POLICY_V5_2026-10-26.md](EFFECTIVE_POLICY_V5_2026-10-26.md)。
 
-## 7. 动漫视觉复核
+## 7. 语义视觉复核
 
 动漫分流使用冻结 CLIP embedding 的轻量 style router；低置信默认走真实策略。
 另外允许一个不给最终动作投票的游戏 UI 路由候选：类型头命中武器，且冻结
 FG-CLIP2 的 `game_ui_weapon_display` Prompt 分数达到 `0.039`。该候选用于解决
 3D 游戏界面被 style router 判为 real、无法进入复核的问题。
 
-视觉 LLM 只在以下条件同时满足时触发：
+动漫/游戏 UI 视觉 LLM 只在以下条件同时满足时触发：
 
 - style score >= 配置门槛；动漫路由未命中时，游戏 UI 武器候选可作为兜底；
 - 初步动作不是 allow；
@@ -149,11 +154,18 @@ FG-CLIP2 的 `game_ui_weapon_display` Prompt 分数达到 `0.039`。该候选用
 
 两类路由同时命中时保留动漫路由来源，避免改变既有动漫样本的复核依据。
 
+真实图片语义实验代码支持新闻执法、军警执勤和合法武器展示，但默认
+`real_context_enabled=false`。医学和体育不触发真实图片视觉路由。即使显式启用，
+还要求 binary 明确阴性、直接暴力类型分数低于 0.65，视觉返回 `real_photo` 且
+injury/attack/threat 全部 absent。
+
 视觉结构包括 injury、attack、threat、weapon_visible、context、appearance、
 threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作：
 
-- 明确游戏/虚构语境且无可见伤害：可允许；
-- 暗黑风格、武器展示或视觉不确定：L1 限流，不转人工；
+- 明确游戏/虚构语境且 injury/attack/threat 全部 absent：可允许；
+- `threat=uncertain` 不允许直接撤回；
+- 暗黑风格、injury mild 或任一关系不确定：L1 限流，不转人工；
+- 原风险 L3 或仅持械不再单独决定 L1；
 - 明确伤害、攻击或威胁：保留原动作；
 - 游戏 UI 候选触发后，视觉返回 real_photo、illustration 或 unknown：保留原动作；
 - grounded 文字违规或视觉调用失败：不撤回原限制。
@@ -174,7 +186,7 @@ threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作
 场景概念来自冻结 FG-CLIP2 图文相似度：
 
 - `risk`：武器威胁、直接攻击、血腥、暴力文字、动物虐待；
-- `safe_context`：医学、新闻、虚构、反暴力；
+- `safe_context`：医学、新闻、军警执勤、虚构、反暴力；
 - `confounder`：红色颜料/物体、合法武器展示；
 - `routing_signal`：游戏 UI/武器皮肤候选，只控制视觉复核路由，不参与动作投票；
 - `domain`：二次元插画、真实照片。
@@ -203,7 +215,8 @@ threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作
 |---|---|
 | CLIP 失败 | 不运行 OCR/场景，返回流程不可用 |
 | 文字检测失败 | 执行 OCR并标记降级 |
-| OCR 未配置/失败且检测到文字 | 不能自动放行 |
+| OCR 未执行且检测到文字 | 不能自动放行 |
+| OCR 工具调用失败 | 记录失败状态；最终动作由其他证据决定 |
 | RAG 不可用 | 文字证据缺失，不补造语义 |
 | 场景 Prompt 失败 | 基础 CLIP 证据仍有效 |
 | LLM 解释失败 | 使用确定性 `render()` |

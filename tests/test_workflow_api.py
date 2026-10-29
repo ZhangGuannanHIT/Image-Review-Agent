@@ -432,7 +432,7 @@ class FixedWorkflowAndAPITests(unittest.TestCase):
         self.assertEqual(tools["anime_router"]["label"], "虚拟风格路由")
         self.assertEqual(
             tools["anime_visual_review"]["label"],
-            "虚拟视觉证据复核",
+            "语义视觉证据复核",
         )
         self.assertNotIn("blood_visual_review", tools)
 

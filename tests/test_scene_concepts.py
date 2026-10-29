@@ -45,7 +45,10 @@ class SceneConceptTests(unittest.TestCase):
         self.assertLessEqual(sum(len(item["prompts"]) for item in concepts), 35)
         self.assertEqual(len({item["key"] for item in concepts}), len(concepts))
         kinds = {item["kind"] for item in concepts}
-        self.assertEqual(kinds, {"risk", "safe_context", "confounder", "domain"})
+        self.assertEqual(
+            kinds,
+            {"risk", "safe_context", "confounder", "routing_signal", "domain"},
+        )
 
     def test_scene_evidence_detects_conflict(self):
         result = build_scene_evidence(
@@ -63,6 +66,37 @@ class SceneConceptTests(unittest.TestCase):
         self.assertTrue(result["context_conflict"])
         self.assertEqual(
             {item["id"] for item in result["knowledge_hits"]}, {"R006", "R009"}
+        )
+
+    def test_game_ui_routing_signal_does_not_change_action_evidence(self):
+        raw = fake_score_result()
+        baseline = build_scene_evidence(
+            raw,
+            risk_margin_threshold=-0.001,
+            safe_context_threshold=0.006,
+            game_ui_trigger_threshold=0.039,
+        )
+        raw["concepts"]["game_ui_weapon_display"] = {
+            "title": "游戏界面或武器皮肤预览",
+            "kind": "routing_signal",
+            "score": 0.05,
+            "max": 0.05,
+            "rag_query": "",
+            "rag_ids": [],
+        }
+        result = build_scene_evidence(
+            raw,
+            risk_margin_threshold=-0.001,
+            safe_context_threshold=0.006,
+            game_ui_trigger_threshold=0.039,
+        )
+        self.assertTrue(result["game_ui_matched"])
+        self.assertEqual(result["risk_margin"], baseline["risk_margin"])
+        self.assertEqual(
+            result["confounder_matched"], baseline["confounder_matched"]
+        )
+        self.assertEqual(
+            result["context_conflict"], baseline["context_conflict"]
         )
 
     def test_scene_tool_skips_l0_before_scoring(self):

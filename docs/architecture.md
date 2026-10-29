@@ -46,7 +46,7 @@ flowchart TD
 | `ocr_image` | 文字检测命中或检测失败 | 调用本地 GLM-OCR 整图识别，不做判罚 |
 | `assess_text_evidence` | OCR 成功后 | 文本质量和本地 RAG 规则命中 |
 | `text_semantic_review` | OCR 有非空文本 | 逐字 quote 校验和文字违规语义 |
-| `match_scene_concepts` | risk 非 L0 | 风险场景、安全语境、混淆项、域候选 |
+| `match_scene_concepts` | risk 非 L0，并行 OCR | 风险场景、安全语境、混淆项、域候选、游戏 UI 路由候选 |
 
 请求级图片和缓存存放在 `ContextVar`，不进入 LLM 或前端状态。
 
@@ -136,12 +136,18 @@ p <= threshold-clear_margin            clear_negative
 ## 7. 动漫视觉复核
 
 动漫分流使用冻结 CLIP embedding 的轻量 style router；低置信默认走真实策略。
+另外允许一个不给最终动作投票的游戏 UI 路由候选：类型头命中武器，且冻结
+FG-CLIP2 的 `game_ui_weapon_display` Prompt 分数达到 `0.039`。该候选用于解决
+3D 游戏界面被 style router 判为 real、无法进入复核的问题。
+
 视觉 LLM 只在以下条件同时满足时触发：
 
-- style score >= 配置门槛；
+- style score >= 配置门槛；动漫路由未命中时，游戏 UI 武器候选可作为兜底；
 - 初步动作不是 allow；
 - 没有 grounded OCR 文字违规；
 - 高风险 RAG 文本没有明确 safe 结论。
+
+两类路由同时命中时保留动漫路由来源，避免改变既有动漫样本的复核依据。
 
 视觉结构包括 injury、attack、threat、weapon_visible、context、appearance、
 threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作：
@@ -149,6 +155,7 @@ threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作
 - 明确游戏/虚构语境且无可见伤害：可允许；
 - 暗黑风格、武器展示或视觉不确定：L1 限流，不转人工；
 - 明确伤害、攻击或威胁：保留原动作；
+- 游戏 UI 候选触发后，视觉返回 real_photo、illustration 或 unknown：保留原动作；
 - grounded 文字违规或视觉调用失败：不撤回原限制。
 
 详细说明见 [ANIME_VISION_STRATEGY_2026-10-27.md](ANIME_VISION_STRATEGY_2026-10-27.md)。
@@ -169,6 +176,7 @@ threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作
 - `risk`：武器威胁、直接攻击、血腥、暴力文字、动物虐待；
 - `safe_context`：医学、新闻、虚构、反暴力；
 - `confounder`：红色颜料/物体、合法武器展示；
+- `routing_signal`：游戏 UI/武器皮肤候选，只控制视觉复核路由，不参与动作投票；
 - `domain`：二次元插画、真实照片。
 
 域 Prompt 当前仅作为策略证据，不是独立风格分类指标。默认门槛基于已有探针临时确定，需用独立二次元数据重新校准。

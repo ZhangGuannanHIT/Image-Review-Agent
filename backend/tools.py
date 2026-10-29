@@ -256,6 +256,9 @@ def build_tools(
                 confounder_threshold=float(
                     scene_options.get("confounder_threshold", 0.006)
                 ),
+                game_ui_trigger_threshold=float(
+                    scene_options.get("game_ui_trigger_threshold", 0.039)
+                ),
                 anime_score_threshold=float(
                     scene_options.get("anime_score_threshold", 0.015)
                 ),

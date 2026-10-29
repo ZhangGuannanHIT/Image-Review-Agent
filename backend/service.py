@@ -361,6 +361,9 @@ class ReviewService:
         ):
             started = time.monotonic()
             review = self.anime_visual_reviewer.review(context.image)
+            if isinstance(review, dict):
+                review = dict(review)
+                review["trigger_route"] = visual_gate["route_source"]
             timings["policy.anime_visual"] = round(
                 (time.monotonic() - started) * 1000
             )

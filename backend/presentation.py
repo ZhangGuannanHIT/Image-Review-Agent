@@ -367,6 +367,7 @@ def _scene_tool(evidence: dict[str, Any], steps: list[dict[str, Any]],
     risk_scenes = list(scene.get("risk_scenes") or [])
     safe_contexts = list(scene.get("safe_contexts") or [])
     confounders = list(scene.get("confounders") or [])
+    routing_signals = list(scene.get("routing_signals") or [])
     matched = bool(scene.get("risk_matched") or scene.get("safe_context_matched"))
     return _tool(
         "scene_prompt",
@@ -378,7 +379,7 @@ def _scene_tool(evidence: dict[str, Any], steps: list[dict[str, Any]],
         summary=(
             f"域：{domain.get('effective', 'unknown')}；"
             f"风险场景 {len(risk_scenes)}；安全语境 {len(safe_contexts)}；"
-            f"混淆项 {len(confounders)}"
+            f"混淆项 {len(confounders)}；路由信号 {len(routing_signals)}"
         ),
         duration_ms=_duration(timings.get("match_scene_concepts")),
         details={
@@ -386,6 +387,13 @@ def _scene_tool(evidence: dict[str, Any], steps: list[dict[str, Any]],
             "risk_scenes": risk_scenes,
             "safe_contexts": safe_contexts,
             "confounders": confounders,
+            "routing_signals": routing_signals,
+            "routing_scores": scene.get("routing_scores") or {},
+            "game_ui_score": _score(scene.get("game_ui_score")),
+            "game_ui_trigger_threshold": _score(
+                scene.get("game_ui_trigger_threshold")
+            ),
+            "game_ui_matched": bool(scene.get("game_ui_matched")),
             "risk_margin": _score(scene.get("risk_margin")),
             "context_conflict": bool(scene.get("context_conflict")),
             "knowledge_hits": scene.get("knowledge_hits") or [],

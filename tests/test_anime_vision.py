@@ -12,7 +12,7 @@ from backend.anime_vision import (
     parse_visual_review,
 )
 from backend.anime_vision_policy import anime_visual_gate, reconcile_anime_visual
-from src.labels import RISK_CLASSES
+from src.labels import RISK_CLASSES, TYPE_CLASSES
 
 
 def decision(action="limit"):
@@ -64,6 +64,15 @@ def visual(**overrides):
 
 
 class AnimeVisionTests(unittest.TestCase):
+    def game_ui_evidence(self, score=0.2):
+        item = evidence(score=score)
+        item["type"] = {"labels": [TYPE_CLASSES[3]]}
+        item["scene_concepts"] = {
+            "game_ui_score": 0.08,
+            "game_ui_matched": True,
+        }
+        return item
+
     def test_gate_requires_high_confidence_anime_and_non_allow_action(self):
         self.assertTrue(anime_visual_gate(decision(), evidence())["eligible"])
         self.assertFalse(anime_visual_gate(
@@ -82,6 +91,41 @@ class AnimeVisionTests(unittest.TestCase):
         )
         self.assertFalse(result["eligible"])
         self.assertIn("text_grounding_unresolved", result["reason"])
+
+    def test_game_ui_prompt_can_route_low_style_score_to_visual_review(self):
+        result = anime_visual_gate(decision(), self.game_ui_evidence())
+        self.assertTrue(result["eligible"])
+        self.assertFalse(result["anime_route"])
+        self.assertTrue(result["game_ui_route"])
+        self.assertEqual(result["route_source"], "game_ui_prompt")
+
+    def test_anime_route_keeps_priority_over_game_ui_candidate(self):
+        item = evidence(score=0.99)
+        item["type"] = {"labels": [TYPE_CLASSES[3]]}
+        item["scene_concepts"] = {
+            "game_ui_score": 0.08,
+            "game_ui_matched": True,
+        }
+        result = anime_visual_gate(decision(), item)
+        self.assertTrue(result["anime_route"])
+        self.assertTrue(result["game_ui_route"])
+        self.assertEqual(result["route_source"], "style_router")
+
+    def test_game_ui_prompt_requires_weapon_signal(self):
+        item = self.game_ui_evidence()
+        item["type"] = {"labels": [TYPE_CLASSES[0]]}
+        result = anime_visual_gate(decision(), item)
+        self.assertFalse(result["eligible"])
+        self.assertIn("visual_route_not_matched", result["reason"])
+
+    def test_real_style_without_game_ui_does_not_enter_visual_review(self):
+        item = evidence(score=0.05)
+        item["type"] = {"labels": [TYPE_CLASSES[3]]}
+        result = anime_visual_gate(decision(), item)
+        self.assertFalse(result["anime_route"])
+        self.assertFalse(result["game_ui_route"])
+        self.assertFalse(result["eligible"])
+        self.assertIn("visual_route_not_matched", result["reason"])
 
     def test_allow_safety_gate_uses_elevated_risk_quality_or_binary(self):
         elevated = anime_visual_gate(
@@ -176,6 +220,17 @@ class AnimeVisionTests(unittest.TestCase):
             )
         )
         self.assertEqual(result["action"], "allow")
+
+    def test_game_ui_route_keeps_action_when_visual_context_is_not_game(self):
+        item = visual(weapon_visible="present", context="real_photo")
+        item["trigger_route"] = "game_ui_prompt"
+        result = reconcile_anime_visual(
+            decision(), self.game_ui_evidence(), item
+        )
+        self.assertEqual(result["action"], "limit")
+        self.assertEqual(
+            result["anime_visual_effect"], "unchanged_non_game_context"
+        )
 
     def test_game_attack_without_injury_or_target_threat_can_allow(self):
         result = reconcile_anime_visual(

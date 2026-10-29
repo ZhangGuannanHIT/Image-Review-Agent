@@ -25,7 +25,9 @@ def load_scene_concepts(path: str | Path = DEFAULT_SCENE_PATH) -> list[dict]:
         seen.add(concept.get("key"))
         if not concept.get("prompts"):
             raise ValueError(f"场景概念 {concept.get('key')} 缺少 prompts")
-        if concept.get("kind") not in {"risk", "safe_context", "confounder", "domain"}:
+        if concept.get("kind") not in {
+            "risk", "safe_context", "confounder", "routing_signal", "domain",
+        }:
             raise ValueError(f"场景概念 {concept.get('key')} kind 无效")
     return concepts
 
@@ -36,6 +38,7 @@ def build_scene_evidence(
     risk_margin_threshold: float,
     safe_context_threshold: float,
     confounder_threshold: float = 0.006,
+    game_ui_trigger_threshold: float = 0.039,
     anime_score_threshold: float = 0.015,
     domain_margin_threshold: float = 0.01,
     top_k: int = 3,
@@ -66,6 +69,15 @@ def build_scene_evidence(
         key=lambda item: item["score"],
         reverse=True,
     )[:top_k]
+    routing_signals = sorted(
+        (
+            {"key": key, **value}
+            for key, value in concepts.items()
+            if value["kind"] == "routing_signal"
+        ),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
     domains = sorted(
         (
             {"key": key, **value}
@@ -89,6 +101,13 @@ def build_scene_evidence(
     confounder_matched = bool(
         confounders and confounder_max >= confounder_threshold
     )
+    routing_scores = {
+        item["key"]: float(item["score"]) for item in routing_signals
+    }
+    game_ui_score = float(
+        routing_scores.get("game_ui_weapon_display", -1.0)
+    )
+    game_ui_matched = game_ui_score >= game_ui_trigger_threshold
     domain_scores = {item["key"]: item["score"] for item in domains}
     anime_score = float(domain_scores.get("anime_illustration", -1.0))
     real_score = float(domain_scores.get("real_photo", -1.0))
@@ -149,6 +168,11 @@ def build_scene_evidence(
         "risk_scenes": risks,
         "safe_contexts": safe_contexts,
         "confounders": confounders,
+        "routing_signals": routing_signals,
+        "routing_scores": routing_scores,
+        "game_ui_score": round(game_ui_score, 6),
+        "game_ui_trigger_threshold": game_ui_trigger_threshold,
+        "game_ui_matched": game_ui_matched,
         "domains": domains,
         "domain": domain,
         "risk_margin": risk_margin,

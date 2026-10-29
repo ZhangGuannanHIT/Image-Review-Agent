@@ -5,6 +5,9 @@ prompts_path: "knowledge/scene_concepts.json"
 risk_margin_threshold: -0.001031020122095945
 safe_context_threshold: 0.006
 confounder_threshold: 0.006
+# Candidate-only CLIP signal for routing possible game weapon UI to visual
+# review. It never changes the final action on its own.
+game_ui_trigger_threshold: 0.039
 # Provisional domain operating point from the frozen solid/quality scene probes.
 # Recalibrate on a held-out anime/real style set before production use.
 anime_score_threshold: 0.015

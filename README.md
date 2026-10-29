@@ -89,7 +89,7 @@ Copy-Item config/ocr.example.yaml config/ocr.yaml
 - `config/inference.yaml`：已标定的暴力类型、图像质量阈值。
 - `backend/config.yaml` → `features.llm_explanation_mode`：默认 `selective`。放行和限流使用程序固定模板；人工复核、下架才调用 LLM，并按固定 JSON 字段填写解释。
 - `backend/config.yaml` → `text_detection`：轻量文字检测参数；默认 `opencv_light`，无需模型权重。
-- `backend/config.yaml` → `anime_vision_review`：仅虚拟内容高置信路由且动作非放行时调用视觉 LLM。
+- `backend/config.yaml` → `anime_vision_review`：高置信虚拟内容，或“武器类型 + 游戏 UI Prompt”窄候选且动作非放行时调用视觉 LLM；非游戏语境保留原动作。
 - `audit.save_images`：是否保存审核原图。日志与图片不上传 GitHub。
 
 阿里云 OCR 配置见 [ALIYUN_OCR.md](docs/ALIYUN_OCR.md)。AppCode 只放在本地

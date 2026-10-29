@@ -132,6 +132,19 @@
     "rag_ids": ["R002", "R008", "R011"]
   },
   {
+    "key": "game_ui_weapon_display",
+    "title": "游戏界面或武器皮肤预览",
+    "kind": "routing_signal",
+    "prompts": [
+      "电子游戏武器皮肤预览界面，带有游戏菜单、物品栏、装备按钮和三维武器模型",
+      "a video game weapon skin preview screen with menu, inventory, equip button, and 3D weapon model",
+      "第一人称射击游戏界面，带有准星、弹药、小地图、HUD和游戏内武器",
+      "a first-person shooter gameplay screenshot with crosshair, ammo counter, minimap, HUD, and in-game weapon"
+    ],
+    "rag_query": "",
+    "rag_ids": []
+  },
+  {
     "key": "anime_illustration",
     "title": "二次元插画或动画风格",
     "kind": "domain",

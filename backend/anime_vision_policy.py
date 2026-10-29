@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from src.labels import RISK_CLASSES
+from src.labels import RISK_CLASSES, TYPE_CLASSES
 
 
 def _sync_recommendation(
@@ -42,15 +42,26 @@ def anime_visual_gate(
     if isinstance(style, dict) and style:
         score = float(style.get("score") or 0)
         anime_route = score >= min_style_score
-        route_source = "style_router"
+        anime_route_source = "style_router"
     else:
         score = float(scene_domain.get("anime_score") or 0)
         anime_route = bool(scene_domain.get("anime_matched"))
-        route_source = "scene_prompt"
+        anime_route_source = "scene_prompt"
+    scene = evidence.get("scene_concepts") or {}
+    game_ui_score = float(scene.get("game_ui_score") or -1.0)
+    game_ui_matched = bool(scene.get("game_ui_matched"))
+    type_labels = set((evidence.get("type") or {}).get("labels") or [])
+    weapon_signal = TYPE_CLASSES[3] in type_labels
+    game_ui_route = bool(game_ui_matched and weapon_signal)
+    route_matched = bool(anime_route or game_ui_route)
+    # Keep the established anime route when both signals fire. The game-UI
+    # prompt is a fallback for real-looking game screens, not a replacement
+    # for an already matched virtual-style route.
+    route_source = anime_route_source if anime_route else "game_ui_prompt"
     reasons = []
     safety_signals: list[str] = []
-    if not anime_route:
-        reasons.append("style_score_below_threshold")
+    if not route_matched:
+        reasons.append("visual_route_not_matched")
     action = decision.get("action")
     if action in {"limit", "review", "block"}:
         action_reviewable = True
@@ -89,6 +100,11 @@ def anime_visual_gate(
         "min_style_score": min_style_score,
         "route_source": route_source,
         "anime_route": anime_route,
+        "game_ui_route": game_ui_route,
+        "game_ui_score": game_ui_score,
+        "game_ui_matched": game_ui_matched,
+        "weapon_signal": weapon_signal,
+        "route_matched": route_matched,
         "action": decision.get("action"),
         "risk": decision.get("risk_raw"),
         "allow_safety_review": bool(allow_safety_review),
@@ -117,6 +133,7 @@ def reconcile_anime_visual(
     weapon_visible = review.get("weapon_visible")
     context = review.get("context")
     appearance = review.get("appearance")
+    trigger_route = review.get("trigger_route")
     game_context = context in {"game_ui", "game_gameplay"}
     fiction_score = max(
         [
@@ -135,6 +152,10 @@ def reconcile_anime_visual(
         and threat != "present"
         and appearance == "cartoon"
     )
+    if trigger_route == "game_ui_prompt" and not game_context:
+        result["anime_visual_effect"] = "unchanged_non_game_context"
+        result["anime_visual_resolution"] = "keep"
+        return result
     if (
         (game_context or fictional_action)
         and injury == "absent"

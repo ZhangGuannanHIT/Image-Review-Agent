@@ -69,3 +69,9 @@ secrets/
 # 本地打包与前端测试预览
 /frontend*.zip
 /frontend/preview-*.png
+
+# 本地文档、测试、旧版前端与 OCR 模型，不参与发布
+/docs/
+/tests/
+/frontend_1008/
+/local_models/

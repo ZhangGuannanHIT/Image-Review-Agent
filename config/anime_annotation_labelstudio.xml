@@ -1,0 +1,63 @@
+<View>
+  <Image name="image" value="$image" zoom="true" maxZoom="4"/>
+
+  <Header value="风险等级（单选）：L0=明确安全，L1=轻度，L2=中度，L3=严重，X=无法判定"/>
+  <Choices name="risk_level" toName="image" choice="single" required="true">
+    <Choice value="L0_安全"/>
+    <Choice value="L1_轻微违规"/>
+    <Choice value="L2_中度违规"/>
+    <Choice value="L3_严重违规"/>
+    <Choice value="X_无法判定"/>
+  </Choices>
+
+  <Header value="暴力类型（多选）。无暴力可以与血腥后果、暗示威胁共存，但不能与攻击进行中同时选。"/>
+  <Taxonomy name="violence_type" toName="image" required="true">
+    <Choice value="无暴力"/>
+    <Choice value="直接暴力（攻击进行中）"/>
+    <Choice value="后果展示（尸体/伤口）"/>
+    <Choice value="暗示/威胁（武器指向/捆绑）"/>
+  </Taxonomy>
+
+  <Header value="血腥程度（单选）"/>
+  <Choices name="injury_detail" toName="image" choice="single" required="true">
+    <Choice value="无血腥"/>
+    <Choice value="轻微（微量血迹/淤青）"/>
+    <Choice value="中度（明显开放性伤口/大量血泊）"/>
+    <Choice value="严重（器官/骨骼暴露/分尸）"/>
+  </Choices>
+
+  <Header value="图像质量（多选）"/>
+  <Taxonomy name="quality" toName="image" required="true">
+    <Choice value="清晰"/>
+    <Choice value="轻微模糊"/>
+    <Choice value="严重模糊"/>
+    <Choice value="文字扭曲形变"/>
+    <Choice value="故意遮挡（马赛克/黑条/贴纸）"/>
+  </Taxonomy>
+
+  <Header value="风格域（单选，用于后续动漫路由校准）"/>
+  <Choices name="style_domain" toName="image" choice="single" required="true">
+    <Choice value="二次元插画"/>
+    <Choice value="2D动画"/>
+    <Choice value="3D动画"/>
+    <Choice value="AI写实"/>
+    <Choice value="真实照片"/>
+    <Choice value="其他"/>
+  </Choices>
+
+  <Header value="场景语境（可多选）"/>
+  <Taxonomy name="scene_context" toName="image">
+    <Choice value="虚构影视动画"/>
+    <Choice value="新闻/通报"/>
+    <Choice value="医学/教学"/>
+    <Choice value="反暴力宣传"/>
+    <Choice value="猎奇/暗黑风格"/>
+    <Choice value="普通展示"/>
+    <Choice value="其他"/>
+  </Taxonomy>
+
+  <Header value="备注：写可见依据和边界，不要只写“违规/安全”"/>
+  <TextArea name="note" toName="image" required="false"
+            placeholder="例如：动画人物摆战斗姿势；持刀但未指向/伤害；红色西瓜遮挡嘴部"
+            maxSubmissions="1" rows="3"/>
+</View>

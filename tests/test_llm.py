@@ -9,7 +9,6 @@ from unittest.mock import patch
 from backend import tools as tools_mod
 from backend.llm import DeepSeekConfig, LLMClient
 from backend.mock import MockOCRClient, MockReviewEngine, RuleBasedMockChatModel
-from backend.prompts import build_system_prompt
 from backend.service import ReviewService
 
 
@@ -84,13 +83,16 @@ class DeepSeekConfigTests(unittest.TestCase):
         finally:
             tools_mod.reset_current_image(token)
 
-    def test_rag_prompt_states_evidence_boundaries(self):
-        enabled = build_system_prompt(rag_enabled=True)
-        disabled = build_system_prompt(rag_enabled=False)
-        self.assertIn("检索无命中不代表图片安全", enabled)
-        self.assertIn("不能补造当前图片的视觉事实", enabled)
-        self.assertIn("teaching_case", enabled)
-        self.assertIn("不要调用 search_knowledge", disabled)
+    def test_service_uses_fixed_workflow_without_llm_tool_selection(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            service = ReviewService(
+                RuleBasedMockChatModel(),
+                MockReviewEngine(),
+                MockOCRClient(),
+                log_dir=log_dir,
+            )
+        self.assertTrue(hasattr(service, "workflow"))
+        self.assertFalse(hasattr(service, "agent"))
 
 
 if __name__ == "__main__":

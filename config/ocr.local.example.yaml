@@ -1,0 +1,11 @@
+# Local GLM-OCR SDK server. Start the independent `glmocr` environment first.
+local_glm_ocr:
+  provider: "local_glm_ocr"
+  model: "glm-ocr"
+  endpoint: "http://127.0.0.1:8080/v1/chat/completions"
+  timeout: 180
+  max_image_mb: 15
+  max_side: 1280
+  api_mode: "direct_vllm"
+  prompt: "Text Recognition:"
+  max_tokens: 2048

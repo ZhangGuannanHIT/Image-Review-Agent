@@ -27,7 +27,6 @@ secrets/
 # 不加斜杠是为了同时忽略"软链接形式的 fg_clip"（git 不把软链接当目录）
 /fg_clip
 /fg_clip/
-/local_models/
 /checkpoints/*
 !/checkpoints/best/
 *.safetensors
@@ -43,6 +42,8 @@ secrets/
 /deliverables/
 /sample_images/
 /eval_results/
+/pic/
+/solid/
 
 # 运行日志与临时文件
 /backend/logs/
@@ -53,8 +54,16 @@ secrets/
 # Small deployment checkpoint is intentionally versioned.
 !/checkpoints/best/adapter_model.safetensors
 !/checkpoints/best/head.pt
+!/checkpoints/best/injury_binary/
 !/checkpoints/best/injury_binary/head.pt
+!/checkpoints/best/injury_binary/metadata.json
+!/checkpoints/best/quality_fusion/
 !/checkpoints/best/quality_fusion/head.pt
+!/checkpoints/best/quality_fusion/metadata.json
+!/checkpoints/anime_style_router/
+!/checkpoints/anime_style_router/README.md
+!/checkpoints/anime_style_router/router.pt
+!/checkpoints/anime_style_router/metadata.json
 /fgclip_train_2026-10-18/
 
 # 本地打包与前端测试预览

@@ -52,7 +52,7 @@ def make_engine(quality_logits):
 
 
 class QualityInferenceTests(unittest.TestCase):
-    def test_predict_and_agent_evidence_preserve_multiple_labels(self):
+    def test_predict_and_workflow_evidence_preserve_multiple_labels(self):
         output = make_engine([-4., 4., -4., -4., 4.]).predict(b"in-memory fixture")
         expected = [labels.QUALITY_CLASSES[1], labels.QUALITY_CLASSES[4]]
         self.assertEqual(output.quality_labels, expected)

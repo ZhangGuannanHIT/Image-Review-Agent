@@ -38,8 +38,45 @@ class InferenceConfigTests(unittest.TestCase):
         config = load_inference_config()
         self.assertTrue(config["model_path"])
         self.assertIn("ckpt_dir", config)
+        self.assertEqual(
+            config.get("anime_style_router_dir"),
+            "checkpoints/anime_style_router",
+        )
+        self.assertEqual(float(config.get("anime_style_min_score")), 0.90)
         self.assertIn("device", config)
         self.assertIn("lora", config)
+
+    def test_backend_anime_visual_gate_is_explicit(self):
+        import yaml
+        backend = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "backend/config.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        review = backend["anime_vision_review"]
+        self.assertTrue(review["enabled"])
+        self.assertEqual(float(review["min_style_score"]), 0.90)
+        self.assertFalse(review["real_context_enabled"])
+        self.assertEqual(float(review["real_context_trigger_threshold"]), 0.006)
+        self.assertEqual(float(review["real_context_direct_violence_max"]), 0.65)
+        self.assertTrue(review["allow_safety_review"])
+        self.assertGreaterEqual(int(review["max_tokens"]), 300)
+        self.assertLessEqual(int(review["max_tokens"]), 512)
+        self.assertEqual(int(review["max_retries"]), 1)
+        self.assertTrue(review["json_response"])
+
+    def test_backend_explanation_uses_selective_fixed_template(self):
+        backend = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "backend/config.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        features = backend["features"]
+        self.assertEqual(features["llm_explanation_mode"], "selective")
+        self.assertEqual(
+            features["llm_explanation_actions"],
+            ["review", "block"],
+        )
 
     def test_missing_file_falls_back_to_defaults(self):
         self.assertEqual(load_inference_config("config/does-not-exist.yaml"), {})

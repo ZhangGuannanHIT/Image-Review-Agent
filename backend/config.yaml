@@ -21,35 +21,64 @@ model:
   require_checkpoint: true   # 必须同时加载 LoRA adapter 与分类头
   binary_injury_dir: "checkpoints/best/injury_binary"
   quality_fusion_dir: "checkpoints/best/quality_fusion"
-
-evidence_pipeline:
-  enabled: true
-  model_dir: "local_models/glm_ocr"
-  rapid_dir: "local_models/rapidocr"
-  easy_dir: "local_models/easyocr"
+  anime_style_router_dir: "checkpoints/anime_style_router"
+  anime_style_min_score: 0.90
 
 features:
   ocr_enabled: true
   lowlevel_enabled: true
   rag_enabled: true           # 启用本地规则与案例检索，无额外服务依赖
+  scene_concepts_enabled: true # 仅风险非 L0 时由固定工作流调用
+  llm_explanation_enabled: true
+  # selective: 仅指定动作调用 LLM，其他动作使用固定程序模板。
+  llm_explanation_mode: "selective"
+  llm_explanation_actions: ["review", "block"]
 
-# ReAct agent 配置（LLM 为核心）
-agent:
-  max_rounds: 5
-  on_tool_fail: "skip"   # 可选工具失败: skip | abort
+scene_concepts:
+  config_path: "config/scene_concepts.yaml"
+
+# Fixed conditional evidence workflow. No LLM controller or tool-selection loop.
+workflow:
+  type: "fixed_evidence"
+
+text_detection:
+  # opencv_light is dependency-free and high-recall. rapidocr needs a local
+  # model/runtime and is recommended when its detection model is available.
+  provider: "opencv_light"
+  rapidocr_model_dir: ""
+  max_side: 1600
+  min_line_height: 7
+  min_layout_score: 0.48
+  min_region_score: 0.52
+  min_aligned_glyphs: 2
 
 log_dir: "backend/logs"
+history_db: "data/reviews.sqlite3"
 
 # 血腥单头的临时业务门槛，未重新标定；风险保留 argmax，类型使用 inference.yaml。
 decision_policy:
   min_injury_confidence: 0.75
   min_injury_margin: 0.20
+  binary_clear_margin: 0.05
+  real_l1_relax_max_confidence: 0.65
+  aggressive_anime_relaxation: true
+  risk_x_auto_allow: true
+  risk_x_prompt_margin_max: 0.015
+  semantic_food_relaxation: true
 audit:
   save_images: true
 
-vision_review:
+anime_vision_review:
+  # High-confidence anime routes or a narrow game-UI weapon candidate can call
+  # the image-capable LLM. Failures never withdraw the original action.
   enabled: true
-  trigger:
-    max_confidence: 0.65
-    min_margin: 0.20
+  max_side: 1280
+  min_style_score: 0.90
+  real_context_enabled: false
+  real_context_trigger_threshold: 0.006
+  real_context_direct_violence_max: 0.65
+  allow_safety_review: true
+  max_tokens: 512
+  max_retries: 1
+  json_response: true
 

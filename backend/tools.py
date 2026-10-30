@@ -1,22 +1,25 @@
 # -*- coding: utf-8 -*-
-"""审核 Agent 工具。
+"""Deterministic review tools.
 
-图片与工具缓存保存在请求级 ContextVar 中，LLM 只看到工具返回的文本证据。
-analyze_image 必须成功执行；其余证据工具由 ReAct Agent 按需选择。
+图片与工具缓存保存在请求级 ContextVar 中。工具由固定工作流按条件调用，
+不再由 LLM 选择。
 """
 
 from __future__ import annotations
 
 import contextvars
 import hashlib
+import io
 import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from langchain_core.tools import BaseTool, tool
+from PIL import Image
 
 from . import lowlevel as lowlevel_mod
 from . import rag as rag_mod
+from .scene_concepts import build_scene_evidence
 from .vision import VisionGate, trigger
 
 
@@ -24,6 +27,7 @@ from .vision import VisionGate, trigger
 class RequestToolContext:
     image: bytes
     cache: dict[str, Any] = field(default_factory=dict)
+    timings_ms: dict[str, float] = field(default_factory=dict)
 
 
 _current_request: contextvars.ContextVar[Optional[RequestToolContext]] = contextvars.ContextVar(
@@ -67,12 +71,44 @@ def _as_dict(output: Any) -> dict[str, Any]:
     }
 
 
+def is_l0_without_conflict(evidence: dict[str, Any]) -> bool:
+    """True only for a high-confidence L0 result with no contradictory evidence."""
+    if evidence.get("risk", {}).get("label") != "L0_安全":
+        return False
+    confidence = evidence.get("risk", {}).get("confidence")
+    if not isinstance(confidence, (int, float)) or confidence < 0.75:
+        return False
+    quality_labels = set(evidence.get("quality", {}).get("labels", []))
+    if quality_labels & {"严重模糊", "文字扭曲形变", "故意遮挡（马赛克/黑条/贴纸）"}:
+        return False
+    type_labels = set(evidence.get("type", {}).get("labels", []))
+    if type_labels - {"无暴力"}:
+        return False
+    injury_label = evidence.get("injury", {}).get("label", "")
+    if injury_label and injury_label != "无血腥":
+        return False
+    binary = evidence.get("blood_binary")
+    if isinstance(binary, dict):
+        score = binary.get("p_blood")
+        threshold = binary.get("threshold")
+        if (
+            isinstance(score, (int, float))
+            and isinstance(threshold, (int, float))
+            and score >= threshold * 0.5
+        ):
+            return False
+    return True
+
+
 def text_evidence(output: Any) -> str:
     """把冻结标签体系下的结构化视觉输出转成 LLM 证据。"""
     data = _as_dict(output)
     return (
         "以下是模型预测，类别括号内是标签定义，不是观察到的具体事实。分数未经概率校准。"
         "type（暴力类型）和 quality（图像质量）为多标签，risk 和 injury 为单标签。"
+        "blood_binary 是独立校准的血腥存在性证据，其阈值来自验证集，不能无视。"
+        "quality 标签只表示严重模糊、文字扭曲或故意遮挡等可靠性提示；"
+        "OCR 是否执行由独立文字检测器决定。"
         "无暴力仅指无正在进行的暴力行为，可以与血腥、后果展示和暗示威胁共存。"
         "保留各类分数与阈值供比较，不能只凭最高类别断言存在伤口或血泊："
         + json.dumps(data, ensure_ascii=False)
@@ -85,15 +121,20 @@ def build_tools(
     ocr_client: Any = None,
     retriever: Any = None,
     *,
+    text_detector: Any = None,
+    enable_text_detection: bool = True,
     enable_ocr: bool = True,
     enable_lowlevel: bool = True,
     enable_rag: bool = True,
     vision_client: Any = None,
     vision_gate: VisionGate | None = None,
+    scene_scorer: Any = None,
+    scene_options: dict | None = None,
 ) -> list[BaseTool]:
     """构造请求工具；依赖通过闭包捕获，不使用模块级共享服务。"""
     retrieve = retriever or rag_mod.retrieve
     gate = vision_gate or VisionGate()
+    scene_options = scene_options or {}
 
     @tool
     def review_blood() -> str:
@@ -119,15 +160,47 @@ def build_tools(
             output = engine.predict(context.image)
             context.cache["analyze_image"] = _as_dict(output)
             context.cache["analyze_image_text"] = text_evidence(output)
-        content = context.cache["analyze_image_text"]
-        if vision_client and trigger(context.cache["analyze_image"], gate)["eligible"]:
-            content += "\n程序按触发条件调用 review_blood 的独立复核结果：" + review_blood.invoke({})
-        return content
+        return context.cache["analyze_image_text"]
+
+    @tool
+    def detect_text() -> str:
+        """轻量检测是否存在文字区域。只决定是否调用 OCR，不读取文字语义。"""
+        context = get_request_context()
+        if text_detector is None:
+            result = {
+                "status": "unavailable",
+                "has_text": False,
+                "boxes": [],
+                "box_count": 0,
+                "method": "not_configured",
+            }
+        elif "text_detection" not in context.cache:
+            try:
+                result = text_detector.detect(context.image)
+            except Exception as exc:  # noqa: BLE001
+                result = {
+                    "status": "failed",
+                    "has_text": False,
+                    "boxes": [],
+                    "box_count": 0,
+                    "method": getattr(text_detector, "method", "unknown"),
+                    "error": type(exc).__name__,
+                }
+        else:
+            result = context.cache["text_detection"]
+        context.cache["text_detection"] = result
+        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def ocr_image() -> str:
-        """可选。使用 GLM-OCR 提取广告、标语、字幕、水印等文字；只返回文字证据，不分析图片语义。"""
+        """可选。使用 OCR 提取广告、标语、字幕、水印等文字及置信度；只返回文字证据，不分析图片语义。"""
         context = get_request_context()
+        if text_detector is not None:
+            if "text_detection" not in context.cache:
+                detect_text.invoke({})
+            detection = context.cache.get("text_detection", {})
+            if detection.get("status") == "empty":
+                return "文字检测未发现候选区域，程序跳过 OCR。"
         if "ocr_image" not in context.cache:
             result = ocr_client.recognize(context.image) if ocr_client else {
                 "success": False, "available": False, "texts": [], "boxes": [],
@@ -137,15 +210,75 @@ def build_tools(
         result = context.cache["ocr_image"]
         if not result.get("success", False):
             if not result.get("available", True):
-                return "GLM-OCR 未配置，本次没有获得文字证据"
-            return f"GLM-OCR 调用失败({result.get('error', 'unknown')})，本次没有获得文字证据"
+                return "OCR 未配置，本次没有获得文字证据"
+            return f"OCR 调用失败({result.get('error', 'unknown')})，本次没有获得文字证据"
         texts = result.get("texts", []) or []
-        return "未检出文字" if not texts else "图中文字: " + "；".join(map(str, texts))
+        if not texts:
+            return "未检出文字"
+        confidence = result.get("mean_confidence")
+        confidence_text = (
+            f"；平均置信度 {confidence:.3f}"
+            if isinstance(confidence, (int, float)) else ""
+        )
+        return "图中文字: " + "；".join(map(str, texts)) + confidence_text
+
+    @tool
+    def match_scene_concepts() -> str:
+        """仅在 CLIP 风险非 L0 时调用。返回候选违规场景、安全语境、RAG 命中和图文冲突提示。"""
+        context = get_request_context()
+        evidence = context.cache.get("analyze_image")
+        if not isinstance(evidence, dict):
+            raise RuntimeError("必须先成功调用 analyze_image")
+        risk_label = evidence.get("risk", {}).get("label", "")
+        if risk_label == "L0_安全":
+            return json.dumps({
+                "status": "skipped",
+                "reason": "risk_l0",
+                "action_effect": "none",
+            }, ensure_ascii=False)
+        if scene_scorer is None:
+            return json.dumps({
+                "status": "skipped",
+                "reason": "not_configured",
+                "action_effect": "none",
+            }, ensure_ascii=False)
+        if "match_scene_concepts" not in context.cache:
+            with Image.open(io.BytesIO(context.image)) as opened:
+                raw = scene_scorer.score(opened.convert("RGB"))
+            context.cache["match_scene_concepts"] = build_scene_evidence(
+                raw,
+                risk_margin_threshold=float(
+                    scene_options.get("risk_margin_threshold", -0.001031)
+                ),
+                safe_context_threshold=float(
+                    scene_options.get("safe_context_threshold", 0.006)
+                ),
+                confounder_threshold=float(
+                    scene_options.get("confounder_threshold", 0.006)
+                ),
+                game_ui_trigger_threshold=float(
+                    scene_options.get("game_ui_trigger_threshold", 0.039)
+                ),
+                anime_score_threshold=float(
+                    scene_options.get("anime_score_threshold", 0.015)
+                ),
+                domain_margin_threshold=float(
+                    scene_options.get("domain_margin_threshold", 0.01)
+                ),
+                top_k=int(scene_options.get("top_k", 3)),
+                retrieve=retrieve,
+            )
+        return json.dumps(context.cache["match_scene_concepts"], ensure_ascii=False)
 
     @tool
     def analyze_lowlevel() -> str:
         """可选。需要颜色、边缘、方差等数值时调用；不识别血腥、遮挡或违规。"""
         context = get_request_context()
+        if (
+            "analyze_image" in context.cache
+            and context.cache.get("l0_short_circuit")
+        ):
+            return "CLIP 已判定 L0 且无内容冲突，程序跳过低层分析。"
         if "analyze_lowlevel" not in context.cache:
             context.cache["analyze_lowlevel"] = lowlevel_mod.extract(context.image)
         return lowlevel_mod.to_text(context.cache["analyze_lowlevel"])
@@ -162,12 +295,9 @@ def build_tools(
         cases = context.cache[cache_key]
         return "未检索到相关规则或判例" if not cases else json.dumps(cases, ensure_ascii=False)
 
-    @tool
-    def finalize_review(suggestion: str) -> str:
-        """提交面向运营的一句话最终审核建议。调用守卫会拒绝任何缺少成功 CLIP 分析的提交。"""
-        return suggestion.strip()
-
     tools: list[BaseTool] = [analyze_image]
+    if enable_text_detection:
+        tools.append(detect_text)
     if vision_client:
         tools.append(review_blood)
     if enable_ocr:
@@ -176,7 +306,8 @@ def build_tools(
         tools.append(analyze_lowlevel)
     if enable_rag:
         tools.append(search_knowledge)
-    tools.append(finalize_review)
+    if scene_scorer is not None:
+        tools.append(match_scene_concepts)
     return tools
 
 

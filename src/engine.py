@@ -32,6 +32,7 @@ class ModelOutput:
     conf: float
     trained: bool = False
     blood_binary: Optional[dict[str, Any]] = None
+    anime_style: Optional[dict[str, Any]] = None
 
     @property
     def risk_label(self) -> str:
@@ -114,6 +115,8 @@ class ReviewEngine:
         quality_thresholds: Optional[dict[str, float]] = None,
         binary_injury_dir: str = "",
         quality_fusion_dir: str = "",
+        anime_style_router_dir: str = "",
+        anime_style_min_score: float = 0.90,
     ):
         self.model_path = str(model_path)
         self.ckpt_dir = str(ckpt_dir or "")
@@ -129,6 +132,8 @@ class ReviewEngine:
         self.strict_load = strict_load
         self.binary_injury_dir = str(binary_injury_dir or "")
         self.quality_fusion_dir = str(quality_fusion_dir or "")
+        self.anime_style_router_dir = str(anime_style_router_dir or "")
+        self.anime_style_min_score = float(anime_style_min_score)
         self.model: Optional[ReviewModel] = None
         self.processor = None
         self.binary_head = None
@@ -136,6 +141,8 @@ class ReviewEngine:
         self.quality_fusion_head = None
         self.quality_fusion_mean = None
         self.quality_fusion_std = None
+        self.anime_style_router = None
+        self.anime_style_threshold = 0.5
         self.trained = False
         self.head_loaded = False
         self.adapter_loaded = False
@@ -168,6 +175,11 @@ class ReviewEngine:
                 self._load_binary_injury(self.binary_injury_dir)
             if self.quality_fusion_dir:
                 self._load_quality_fusion(self.quality_fusion_dir)
+            if (
+                self.anime_style_router_dir
+                and Path(self.anime_style_router_dir).is_dir()
+            ):
+                self._load_anime_style_router(self.anime_style_router_dir)
             self.model.eval()
         except Exception as exc:  # noqa: BLE001
             self.model = None
@@ -255,6 +267,17 @@ class ReviewEngine:
             label: float(thresholds[label]) for label in labels.QUALITY_CLASSES
         }
 
+    def _load_anime_style_router(self, head_dir: str) -> None:
+        assert self.model is not None
+        from .anime_style_router import load_anime_style_router
+
+        self.anime_style_router, metadata = load_anime_style_router(
+            head_dir, self.model.embed_dim, self.device
+        )
+        self.anime_style_threshold = max(
+            float(metadata["threshold"]), self.anime_style_min_score
+        )
+
     def save_checkpoint(self, output_dir: str, metrics: Optional[dict] = None) -> None:
         if self.model is None:
             raise RuntimeError("模型未加载，无法保存 checkpoint")
@@ -313,6 +336,19 @@ class ReviewEngine:
                     "label": "有血腥" if blood_score >= self.binary_threshold else "无血腥",
                     "trained": True,
                 }
+            anime_style = None
+            if getattr(self, "anime_style_router", None) is not None:
+                anime_score = float(
+                    torch.sigmoid(
+                        self.anime_style_router(image_embeds)
+                    ).item()
+                )
+                anime_style = {
+                    "score": round(anime_score, 6),
+                    "threshold": self.anime_style_threshold,
+                    "is_anime": anime_score >= self.anime_style_threshold,
+                    "source": "frozen_clip_embedding_router",
+                }
 
         risk = _single_label(logits["risk"], labels.RISK_CLASSES)
         injury = _single_label(logits["injury"], labels.INJURY_CLASSES)
@@ -355,7 +391,7 @@ class ReviewEngine:
         return ModelOutput(
             risk=risk, type=type_result, injury=injury, quality=quality,
             conf=round(float(confidence), 6), trained=self.trained,
-            blood_binary=blood_binary,
+            blood_binary=blood_binary, anime_style=anime_style,
         )
 
     def review(self, image: ImageInput, opts: Optional[dict] = None) -> dict[str, Any]:

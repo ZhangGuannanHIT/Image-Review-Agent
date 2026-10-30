@@ -1,296 +1,238 @@
 # 违规内容审核系统架构
 
-> 当前架构：FG-CLIP2 必经工具 + 调用守卫 + ReAct 可选工具。本文以实际代码为准。
+> 当前架构：FG-CLIP2 证据 + 固定条件式工具流程 + effective risk policy v2 + 受限语义视觉 LLM。
 
 ## 1. 系统边界
 
-系统接收一张图片，返回审核编号和面向运营的建议文本。FG-CLIP2 是唯一视觉理解模块；LLM 不能直接查看图片，只能读取工具产生的文本证据。
+系统接收一张图片，返回审核编号和面向运营的建议。FG-CLIP2 提供通用视觉证据；OCR、RAG 和场景 Prompt 补充语境；动漫/游戏 UI 窄路由可调用结构化视觉 LLM；程序始终锁定最终动作。
 
-所有视觉训练、推理和评估严格沿用当前 Label Studio 标注方式，不新增或替换标签任务。
-
-## 2. 分层架构
+## 2. 固定流程
 
 ```mermaid
 flowchart TD
-    FE[前端] -->|multipart image| API[FastAPI / backend/api.py]
-    API --> SVC[ReviewService / backend/service.py]
-    SVC --> CTX[请求级图片 ContextVar]
-    SVC --> GRAPH[受控 ReAct StateGraph / backend/agent.py]
-    GRAPH --> GUARD[CLIP 调用守卫]
-    GRAPH --> TOOLS[Agent Tools / backend/tools.py]
-    TOOLS --> CLIP[analyze_image / ReviewEngine]
-    TOOLS --> OCR[ocr_image / GLM-OCR]
-    TOOLS --> LOW[analyze_lowlevel / OpenCV]
-    TOOLS -. 按需检索 .-> RAG[search_knowledge / Retriever]
-    TOOLS --> FINAL[finalize_review]
-    CLIP --> MODEL[FG-CLIP2 + 可选 LoRA + 四任务头]
-    GRAPH --> LOG[JSONL 轨迹日志]
-    SVC --> API
-    API -->|id + suggestion| FE
+    API[FastAPI] --> SVC[ReviewService]
+    SVC --> WF[FixedReviewWorkflow]
+    WF --> CLIP[analyze_image / FG-CLIP2]
+    CLIP --> BINARY[binary injury]
+    CLIP --> QUALITY[quality fusion]
+    WF --> DETECT[detect_text / lightweight]
+    DETECT -->|detected or failed| OCR[ocr_image / local GLM-OCR]
+    OCR --> RAG[assess_text_evidence / local RAG]
+    RAG --> TSEM[grounded OCR semantic review]
+    WF -->|risk non-L0| SCENE[match_scene_concepts]
+    RAG --> POLICY[effective risk policy]
+    SCENE --> POLICY
+    BINARY --> POLICY
+    QUALITY --> POLICY
+    POLICY --> ACTION[allow / limit / review / block]
+    ACTION -->|high-confidence anime or narrow game UI and non-allow| AVIS[structured visual evidence review]
+    AVIS --> POLICY2[program reconciliation]
+    ACTION -->|real semantic experiment, disabled by default| RVIS[real-context visual review]
+    RVIS --> POLICY2
+    POLICY2 --> ACTION
+    ACTION -->|allow / limit| TEMPLATE[program explanation template]
+    ACTION -->|review / block| EXPLAIN[fixed-schema LLM explanation]
+    EXPLAIN -->|failure| TEMPLATE
+    EXPLAIN --> API
+    TEMPLATE --> API
 ```
 
-## 3. Agent 行为
+不存在 ReAct 循环、LLM 工具选择、`finalize_review` 或 LangGraph 调用守卫。
 
-### 3.1 工具
+## 3. 工具
 
-| 工具                 |   必需性 | 职责                                               |
-| -------------------- | -------: | -------------------------------------------------- |
-| `analyze_image`    |     必须 | FG-CLIP2 输出四字段基础视觉证据                    |
-| `ocr_image`        |     可选 | 调用智谱 GLM-OCR，提取广告、字幕、标语、水印等文字 |
-| `analyze_lowlevel` |     可选 | 提供红色、模糊、边缘、细密纹理、信息熵提示         |
-| `search_knowledge` | 按需调用 | CLIP 成功后检索本地规则与案例，结果仅作辅助证据     |
-| `finalize_review`  | 最终动作 | 提交一句审核建议                                   |
+| 工具 | 触发条件 | 职责 |
+|---|---|---|
+| `analyze_image` | 每张图 | risk、type、injury、quality fusion、binary |
+| `detect_text` | 每张图 | 判断是否存在文字候选区域 |
+| `ocr_image` | 文字检测命中或检测失败 | 调用本地 GLM-OCR 整图识别，不做判罚 |
+| `assess_text_evidence` | OCR 成功后 | 文本质量和本地 RAG 规则命中 |
+| `text_semantic_review` | OCR 有非空文本 | 逐字 quote 校验和文字违规语义 |
+| `match_scene_concepts` | risk 非 L0，并行 OCR | 风险场景、安全语境、混淆项、域候选、游戏 UI 路由候选 |
 
-### 3.2 调用守卫
+请求级图片和缓存存放在 `ContextVar`，不进入 LLM 或前端状态。
 
-调用守卫是程序约束，不依赖 Prompt 自觉：
+`review_blood` 是早期实验遗留代码，不属于当前固定流程。`run_backend.py`
+不会创建该客户端，因此生产服务不会注册、调用或展示这一工具；前端也只展示实际执行过的复核。
+
+## 4. 文字检测
+
+默认实现为 `LightweightTextDetector`：
+
+- OpenCV Sobel/形态学生成文字行候选；
+- 对候选区域检查等高字符组件、基线一致性和横向间隔；
+- 只返回状态、区域数、框和置信度，不读取文字。
+
+检测策略是高召回：
+
+- `detected`：执行 OCR；
+- `failed`：执行 OCR并标记降级；
+- `empty`：跳过 OCR；
+- 高置信 L0 也必须先执行文本检测。
+
+`quality=文字扭曲形变` 不再单独调用 OCR。它只在真实域文字检测命中但 OCR 无法读取时作为可靠性保护。
+
+可选 `RapidOCRTextDetector` 在本地 RapidOCR 可用时启用：
+
+```yaml
+text_detection:
+  provider: "rapidocr"
+```
+
+OCR 文本语义复核只输出 `violation/safe/uncertain`。`violation` 必须包含 OCR
+原文中逐字出现且至少 3 字符的 `quote`，同时说明对象和伤害动作；`quote`
+内容不匹配时判为无效，不允许模型补造。另保留一个窄规则，只处理
+“条件/邀请行为 + 第一人称伤害响应”，同时排除新闻、引用、否定和虚构表达。
+
+生产 OCR 使用独立 `glmocr` conda 环境中的 GLM-OCR 0.9B。vLLM 在 GPU
+提供 OpenAI 兼容接口，PP-DocLayoutV3 文档布局模型在 CPU 上作为可选文档模式；
+普通图片审核绕过布局流水线，直接进行一次整图 `Text Recognition:` 请求。
+OCR 与场景 Prompt 在 CLIP 完成后并行执行。
+
+## 5. 模型输出
 
 ```text
-Agent 请求 finalize_review
-    ├── clip_succeeded = true  → 接受建议并结束
-    └── clip_succeeded = false → 拒绝提交并返回 Agent
+FG-CLIP2 视觉 embedding
+  ├── risk head: L0/L1/L2/L3/X
+  ├── type head: 4 个独立二分类
+  ├── injury head: 4 类严重程度
+  ├── quality fusion: 5 个独立标签
+  └── binary injury: 血腥存在性
 ```
 
-如果 `analyze_image` 执行失败，状态记录 `clip_called=true`、`clip_succeeded=false`，流程返回“视觉模型不可用”，不得伪造正常审核结论。
+risk、type、injury 和 quality 是独立估计器，相互没有因果边。训练时通过共享表征和联合损失产生统计相关。
 
-同一请求重复调用 `analyze_image` 时读取请求缓存，不重复执行模型推理。
+quality fusion 加载后覆盖旧 quality 输出，策略只使用 fusion 结果。
 
-### 3.3 无显式 finalize 的兼容处理
+## 6. effective risk
 
-若 LLM 已取得 CLIP 证据但直接返回非空文本，状态图可将该文本作为建议结束；若尚无 CLIP 证据，则守卫追加指令并要求调用 `analyze_image`。达到最大轮次时，只能生成明确标记的降级建议。
-
-### 3.4 状态
-
-`ReviewState` 的关键字段：
+程序保留：
 
 ```text
-messages            ReAct 消息流
-filename            日志文件名
-tool_results         结构化工具结果
-steps                工具轨迹
-rounds               LLM 轮次
-clip_called          是否尝试调用 CLIP
-clip_succeeded       CLIP 是否成功
-suggestion           最终建议
-finalized            是否结束
-degraded             是否降级
+risk_raw        risk 头原始 argmax 和全部分数
+effective_risk  综合内容和语境证据后的策略等级
 ```
 
-图片二进制不在 State 中传播，而是存放在请求级 ContextVar。工具结果返回给 LLM 时转换为文本，完整结构只进入内部状态和日志。
-
-## 4. 一次请求的时序
+binary 采用三段式：
 
 ```text
-1. API 限制大小并验证 jpg/png/webp 可解码
-2. Service 创建 request_id 和图片 ContextVar
-3. Agent 开始 ReAct
-4. Agent 调用 analyze_image
-5. ReviewEngine 读取图片并返回四任务结果
-6. Agent 根据证据选择 GLM-OCR、低层分析或本地 RAG 检索
-7. Agent 调用 finalize_review
-8. 调用守卫检查 clip_succeeded
-9. Service 写入工具轨迹和结构化证据
-10. API 返回 id + suggestion
-11. finally 中清理 ContextVar
+p >= threshold                         positive
+threshold-clear_margin < p < threshold uncertain
+p <= threshold-clear_margin            clear_negative
 ```
 
-## 5. 视觉模型
+策略原则：
 
-```text
-图片
-  ↓ AutoImageProcessor / 动态 max_num_patches
-FG-CLIP2 Vision Transformer
-  ↓ 768 维 pooler output
-共享层 Linear(768,512) + GELU + Dropout
-  ├── risk head: 5
-  ├── violence type head: 4
-  ├── injury head: 4
-  └── quality head: 5
+- binary 阴性只否决血腥支持，不删除独立攻击、威胁或文字证据；
+- risk L1/L2 + binary clear negative + 无独立内容支持，才可能进入假冲突降级；
+- 动漫/插画域 Prompt、动漫域质量异常、已确认安全语境和场景混淆项可解释假冲突；
+- 真实图片语义自动放行默认关闭；
+- `risk_without_support` 无法解除时采用保守限流；
+- `risk_X` 只有在类型头、binary、质量、场景 Prompt 和 OCR/RAG 全部一致阴性时放行；
+- L3 只有在 OCR 安全食物/酱汁语义、红色液体 Prompt、binary 阴性和无独立暴力同时成立时走窄放行；
+- 分数缺失、行为冲突、binary 近阈值和 OCR 未完成仍保留复核；
+- 安全语境最多把下架降为限流；
+- RAG 高风险命中本身不直接限流；必须由逐字 quote 或窄条件规则确认。
+  若语义复核无法给出 safe 或 grounded violation，则进入人工核对。
+- 确认高风险 OCR 文字可独立把 L0 提升为限流。
+
+详细口径和冻结探针见 [EFFECTIVE_POLICY_V5_2026-10-26.md](EFFECTIVE_POLICY_V5_2026-10-26.md)。
+
+## 7. 语义视觉复核
+
+动漫分流使用冻结 CLIP embedding 的轻量 style router；低置信默认走真实策略。
+另外允许一个不给最终动作投票的游戏 UI 路由候选：类型头命中武器，且冻结
+FG-CLIP2 的 `game_ui_weapon_display` Prompt 分数达到 `0.039`。该候选用于解决
+3D 游戏界面被 style router 判为 real、无法进入复核的问题。
+
+动漫/游戏 UI 视觉 LLM 只在以下条件同时满足时触发：
+
+- style score >= 配置门槛；动漫路由未命中时，游戏 UI 武器候选可作为兜底；
+- 初步动作不是 allow；
+- 没有 grounded OCR 文字违规；
+- 高风险 RAG 文本没有明确 safe 结论。
+
+两类路由同时命中时保留动漫路由来源，避免改变既有动漫样本的复核依据。
+
+真实图片语义实验代码支持新闻执法、军警执勤和合法武器展示，但默认
+`real_context_enabled=false`。医学和体育不触发真实图片视觉路由。即使显式启用，
+还要求 binary 明确阴性、直接暴力类型分数低于 0.65，视觉返回 `real_photo` 且
+injury/attack/threat 全部 absent。
+
+视觉结构包括 injury、attack、threat、weapon_visible、context、appearance、
+threat_basis、threat_target、weapon_pose 和 reason。程序负责最终动作：
+
+- 明确游戏/虚构语境且 injury/attack/threat 全部 absent：可允许；
+- `threat=uncertain` 不允许直接撤回；
+- 暗黑风格、injury mild 或任一关系不确定：L1 限流，不转人工；
+- 原风险 L3 或仅持械不再单独决定 L1；
+- 明确伤害、攻击或威胁：保留原动作；
+- 游戏 UI 候选触发后，视觉返回 real_photo、illustration 或 unknown：保留原动作；
+- grounded 文字违规或视觉调用失败：不撤回原限制。
+
+详细说明见 [ANIME_VISION_STRATEGY_2026-10-27.md](ANIME_VISION_STRATEGY_2026-10-27.md)。
+
+### 7.1 解释策略
+
+解释层以程序模板为主。`allow`、`limit` 不调用解释 LLM；`review`、`block`
+才调用 LLM，并且 LLM 只能填写 `summary`、`evidence_note`、`limitation`
+三个固定字段。动作、有效风险、复核建议和程序理由始终由程序生成。
+
+`review` 会额外输出 `recommended_action`、`review_reason`。例如建议限流或建议下架，
+用于指导人工操作，但不改变 `action=review`。
+
+## 8. 场景 Prompt
+
+场景概念来自冻结 FG-CLIP2 图文相似度：
+
+- `risk`：武器威胁、直接攻击、血腥、暴力文字、动物虐待；
+- `safe_context`：医学、新闻、军警执勤、虚构、反暴力；
+- `confounder`：红色颜料/物体、合法武器展示；
+- `routing_signal`：游戏 UI/武器皮肤候选，只控制视觉复核路由，不参与动作投票；
+- `domain`：二次元插画、真实照片。
+
+域 Prompt 当前仅作为策略证据，不是独立风格分类指标。默认门槛基于已有探针临时确定，需用独立二次元数据重新校准。
+
+## 9. 日志与审计
+
+日志保留：
+
+- 输入图片哈希、请求编号、模型和 checkpoint 身份；
+- 工具步骤、耗时、错误类型；
+- 后端总耗时及模型、文字、复核、解释、策略阶段的毫秒耗时；
+- CLIP/binary/quality 全部分数和阈值；
+- 文字检测状态、区域数和置信度；
+- OCR 状态、字符数、文本 SHA-256、平均置信度和请求 ID；
+- RAG 规则 ID；
+- `risk_raw`、`effective_risk`、冲突类型和调整原因；
+- 最终解释状态。
+
+日志不保存 OCR 原文、RAG 正文、消息历史或检索查询原文。
+
+## 10. 故障处理
+
+| 故障 | 行为 |
+|---|---|
+| CLIP 失败 | 不运行 OCR/场景，返回流程不可用 |
+| 文字检测失败 | 执行 OCR并标记降级 |
+| OCR 未执行且检测到文字 | 不能自动放行 |
+| OCR 工具调用失败 | 记录失败状态；最终动作由其他证据决定 |
+| RAG 不可用 | 文字证据缺失，不补造语义 |
+| 场景 Prompt 失败 | 基础 CLIP 证据仍有效 |
+| LLM 解释失败 | 使用确定性 `render()` |
+
+## 11. 测试与评估
+
+```bash
+python -B -m unittest discover -s tests -v
 ```
 
-训练时冻结文本塔，对视觉塔的 `q_proj/k_proj/v_proj/out_proj` 注入 LoRA，并训练四任务头。
+冻结策略评估：
 
-### 推理解码
-
-- risk、injury：softmax + argmax（单标签）；
-- violence type、quality：逐类 sigmoid + 各自阈值（多标签，可同时命中多个；没有类别过阈值时返回空列表，不强制选一个）；
-- 输出标签来自 `src/labels.py`；
-- 多标签阈值来自 `config/inference.yaml`（`src/cli.py` 读取），也可由 `ReviewEngine` 参数覆盖；
-- `trained=false` 表示分类头未加载训练权重，结果不能作为正式审核。
-
-## 6. 标签与损失
-
-| 字段          | 学习方式 | 缺失处理                |
-| ------------- | -------- | ----------------------- |
-| risk          | 加权 CE  | `IGNORE_INDEX`        |
-| violence type | 加权 BCE | `type_valid` 样本掩码 |
-| injury        | 加权 CE  | `IGNORE_INDEX`        |
-| quality       | 加权 BCE | `quality_valid` 掩码  |
-
-总损失：
-
-```text
-1.0 × risk + 0.5 × type + 0.5 × injury + 0.5 × quality
+```bash
+python -B -m src.evaluate_effective_policy ...
+python -B -m src.evaluate_text_detection ...
 ```
 
-缺失的 violence type / quality 不会被编码成全负监督；没有有效样本时使用 `logits.sum() * 0` 保持计算图。quality 无法完整映射时按缺失处理（`quality_valid=False`），该样本不参与 quality 训练与评估。
-
-## 7. 数据规则
-
-输入是 Label Studio JSON；`python -m src.build_dataset` 负责配对、标签头收敛与确定性清洗，输出可直接训练的 `data/clean/`。
-
-- 图片与标签按 `file_upload` 文件名一一配对，缺图任务剔除；无标签的图片不进数据集；
-- 训练标签文件只保留 `risk_level` / `violence_type` / `injury_detail` / `quality` 四个模型输出头，`target` / `note` 剥离到 `review_extras.json`；
-- 确定性矛盾按主因删除：`无暴力 + 其他暴力类型`、`L0_安全` 却标直接暴力/后果展示、`L0_安全` 却有血腥、`L0_安全` 却标暗示/威胁、`L1/L2/L3` 却无暴力且无血腥、`L1/L2/L3` 却缺失表现字段；
-- `L0_安全` 却严重模糊/文字扭曲、`X` 却标「清晰」只进入复核清单，不自动改标签；
-- 未标注任务不进入训练；部分字段缺失时只忽略对应任务损失；
-- 最终数据到位后重新体检并生成固定 `data/split.json`（冒烟划分在 `data/smoke/split.json`）。
-
-## 8. Checkpoint
-
-最小 checkpoint：
-
-```text
-checkpoint/
-├── adapter_config.json
-├── adapter_model.safetensors
-├── head.pt
-├── labels.json
-└── metrics.json
-```
-
-基础模型权重不重复保存。推理时组合：FG-CLIP2 基础权重 + LoRA adapter + 分类头。`labels.json` 用于防止标签顺序不一致。
-
-`labels.json` 由 `labels.checkpoint_schema()` 生成，含 `schema_version: 2` 与 `task_types`（quality 为 `multi_label`）。加载时缺 `labels.json` 或 schema 不匹配都会直接报错，避免把旧单标签 quality 权重当成多标签头使用。
-
-## 9. Mock 与 real 模式
-
-### Mock
-
-用于无 GPU、无训练权重或无外部 API 时验证：
-
-- 调用守卫；
-- Agent 工具链；
-- API；
-- 日志；
-- 前端联调。
-
-Mock 结果必须标记，不用于正式指标。
-
-### Real
-
-真实模式加载 FG-CLIP2 与 DeepSeek，当前配置为 `lora=true`、`require_checkpoint=true`，必须加载训练后的 LoRA 和四任务分类头。Mock 模式用于流程演示，其输出不代表真实模型效果。
-
-## 10. GLM-OCR 工具架构
-
-OCR Provider 已冻结为智谱 `glm-ocr`，模型、地址和密钥单独存放在
-`config/ocr.yaml`，后端总配置只引用该文件。密钥默认留空，运行时可通过
-`OCR_API_KEY` 环境变量覆盖。
-
-```text
-Agent 调用 ocr_image
-  ↓
-OCRClient 读取请求级图片 bytes
-  ↓
-校验并将非 JPG/PNG 图片转成 PNG
-  ↓
-Base64 data URI 编码（携带 image/jpeg 或 image/png MIME）
-  ↓
-POST /api/paas/v4/layout_parsing
-  ↓
-解析 layout_details / md_results
-  ↓
-返回 success + texts + normalized boxes
-  ↓
-工具只把文字证据交给 Agent
-```
-
-统一内部结果：
-
-```json
-{
-  "success": true,
-  "available": true,
-  "provider": "glm_ocr",
-  "model": "GLM-OCR",
-  "texts": ["识别出的文字"],
-  "boxes": [[0.1, 0.2, 0.8, 0.4]],
-  "box_format": "normalized_xyxy",
-  "request_id": "req-...",
-  "error": null
-}
-```
-
-必须区分三种状态：成功且有文字、成功但无文字、调用失败。GLM-OCR 只负责字符
-和版面提取，不允许其承担违规内容语义判断，FG-CLIP2 仍是唯一通用视觉语义模型。
-
-## 11. DeepSeek 裁决模型
-
-裁决 LLM 固定为 `deepseek-v4-flash`，模型名、OpenAI 兼容地址、超时和密钥独立存放在 `config/llm.yaml`。运行时 `LLM_API_KEY` 优先于文件值。LLM 只接收工具文字证据，不接收原始图片。
-
-```text
-ReviewState + System Prompt
-  ↓ bind_tools
-DeepSeek-V4-Flash / OpenAI Chat Completions 兼容接口
-  ↓ tool_calls
-受控 StateGraph + CLIP 调用守卫
-```
-
-当前 `features.rag_enabled=true`，启用标准库字符 n-gram TF-IDF 检索；关闭时同时移除工具并调整提示词。Agent 根据视觉标签及可选 OCR 文字构造文本查询，不进行图片向量检索。规则库、校准集及使用边界见 [RAG 与前端实现说明](RAG与前端实现说明.md)。最终处置继续遵循现有程序规则。
-
-## 12. 故障行为
-
-| 故障              | 行为                                                     |
-| ----------------- | -------------------------------------------------------- |
-| 图片无效          | API 返回 40001                                           |
-| 缺少 image        | API 返回 40002                                           |
-| 服务未初始化      | API 返回 50300                                           |
-| CLIP 失败         | 结束并说明无法完成视觉审核                               |
-| GLM-OCR 未配置    | 明确告知 Agent 本次没有 OCR 证据                         |
-| GLM-OCR 调用失败  | 记录 timeout/http 状态，按配置跳过或终止                 |
-| 低层工具失败      | 按配置跳过或终止                                         |
-| RAG 关闭          | 工具不注册，提示词明确禁止调用                           |
-| DeepSeek Key 缺失 | 启动时明确提示配置`config/llm.yaml` 或 `LLM_API_KEY` |
-| LLM/Agent 异常    | 返回明确的流程不可用建议并记录日志                       |
-
-## 13. 当前实现状态
-
-已实现：
-
-- Label Studio 解析和缺失标签表示；
-- 确定性冲突清理与复核候选；
-- FG-CLIP2 processor 和真实视觉前向；
-- LoRA 视觉塔与四任务头；
-- 加权多任务损失与 type/quality 多标签掩码；
-- 数据配对、标签头收敛与确定性清洗（`src/build_dataset.py`，输出 `data/clean/`）；
-- 推理配置 `config/inference.yaml` 实际生效（`src/cli.py` 读取 type/quality 阈值）；
-- checkpoint 保存/加载接口；
-- 调用守卫和工具缓存；
-- Mock 端到端流程；
-- GLM-OCR JSON+Base64 请求与版面结果适配；
-- DeepSeek-V4-Flash 独立配置与 LangChain 适配；
-- 本地 RAG 规则与案例检索，以及工具启停开关；
-- Python 3.12 + CUDA 12.8 项目虚拟环境与真实基模前向验证；
-- DeepSeek-V4-Flash 真实 Agent 全链路验证；
-- GLM-OCR Base64 data URI 真实接口验证；
-- API 基础校验和统一错误结构；
-- 最小训练、评估入口；
-- 自动化测试 48 项。
-
-当前真实联调结果：
-
-- `/health` 返回 `mock=false`、模型已加载；
-- 示例链路成功执行 `analyze_image → analyze_lowlevel → finalize_review`；
-- CLIP 调用守卫通过，Agent 正常收敛且未降级；
-- OCR 独立真实调用成功；
-- 自动化测试 48 项通过（含 9 项不依赖 torch 的数据与配置测试）。
-
-仍依赖外部条件：
-
-- 最终标注 JSON 与完整图片目录；
-- 正式训练 checkpoint；
-- RAG 独立评测查询与知识库持续维护。
-
-## 14. 仓库与敏感信息边界
-
-GitHub 仓库只保存代码、测试、文档和无密钥配置模板。整个 `fg_clip/`、checkpoint、数据、测试图片、评估产物、阶段性标注 JSON、真实 LLM/OCR 配置、本地环境和日志均由 `.gitignore` 排除。模型与数据通过外部存储协作，不能直接写入 Git 历史。
+当前自动化测试覆盖固定流程、文字检测门控、域证据、真实/动漫策略、日志脱敏、
+结构化 API、工具状态分组、耗时埋点、前端结果工作台和解释权限。

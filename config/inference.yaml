@@ -5,6 +5,10 @@ ckpt_dir: "checkpoints/best"
 device: "cuda"
 lora: true
 strict_load: true
+binary_injury_dir: "checkpoints/best/injury_binary"
+quality_fusion_dir: "checkpoints/best/quality_fusion"
+anime_style_router_dir: "checkpoints/anime_style_router"
+anime_style_min_score: 0.90
 
 # 来源：2026-10-18 训练包 eval/threshold_calibration.json 中的 applied。
 type_thresholds:

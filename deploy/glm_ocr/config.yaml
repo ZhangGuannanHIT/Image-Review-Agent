@@ -1,0 +1,48 @@
+server:
+  host: "127.0.0.1"
+  port: 5002
+  debug: false
+
+logging:
+  level: "INFO"
+
+pipeline:
+  maas:
+    enabled: false
+
+  ocr_api:
+    api_host: "127.0.0.1"
+    api_port: 8080
+    model: "glm-ocr"
+    api_mode: "openai"
+    connect_timeout: 15
+    request_timeout: 180
+    retry_max_attempts: 1
+    connection_pool_size: 16
+
+  max_workers: 4
+  page_maxsize: 20
+  region_maxsize: 200
+
+  page_loader:
+    max_tokens: 4096
+    temperature: 0.0
+    top_p: 0.00001
+    top_k: 1
+    repetition_penalty: 1.1
+    image_expect_length: 4096
+    image_format: "JPEG"
+    min_pixels: 12544
+    max_pixels: 4000000
+
+  result_formatter:
+    output_format: "both"
+
+  layout:
+    model_dir: "/home/ygx/models/PP-DocLayoutV3_safetensors"
+    threshold: 0.3
+    batch_size: 1
+    workers: 1
+    device: "cpu"
+    use_polygon: false
+    layout_nms: true

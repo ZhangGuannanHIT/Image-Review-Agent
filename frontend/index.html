@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ImageGuard · 多模态图片内容审核</title>
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./landing.css">
-  <script src="./config.js" defer></script>
-  <script src="./app.js" defer></script>
+  <meta http-equiv="Cache-Control" content="no-store">
+  <link rel="stylesheet" href="./styles.css?v=20261029-2">
+  <link rel="stylesheet" href="./landing.css?v=20261029-2">
+  <script src="./config.js?v=20261029-2" defer></script>
+  <script src="./app.js?v=20261029-2" defer></script>
 </head>
 <body>
   <a id="skipLink" class="skip-link" href="#landingMain">跳到主要内容</a>
@@ -35,9 +36,9 @@
       <section id="overview" class="landing-hero" aria-labelledby="heroTitle">
         <div class="hero-grid">
           <div class="hero-copy">
-            <p class="hero-kicker">MULTIMODAL REVIEW AGENT</p>
+            <p class="hero-kicker">EVIDENCE-GROUNDED CONTENT REVIEW</p>
             <h1 id="heroTitle">让图片内容审核<br>清晰、快速、可追溯</h1>
-            <p class="hero-summary">以视觉证据为基础，由审核智能体按需调用文字识别与规则检索，为运营人员生成可复核的处理建议。</p>
+            <p class="hero-summary">将视觉模型、条件式取证与确定性策略组织为一套可复核的内容审核流程，为平台提供稳定、清晰、可追溯的处置依据。</p>
             <div class="hero-actions"><a class="hero-primary" href="#workspace">进入审核工作台</a><a class="hero-secondary" href="#workflow">查看审核流程 <span aria-hidden="true">↓</span></a></div>
           </div>
           <div class="hero-system">
@@ -54,23 +55,23 @@
       </section>
 
       <section id="principles" class="landing-section principles-section" aria-labelledby="principlesTitle">
-        <div class="section-intro"><span>DESIGN PRINCIPLES</span><h2 id="principlesTitle">让模型能力服务于审核判断</h2><p>系统不追求一次调用所有工具，而是围绕证据、效率与人工责任组织审核过程。</p></div>
+        <div class="section-intro"><span>DESIGN PRINCIPLES</span><h2 id="principlesTitle">让每一项处置都有证据支撑</h2><p>以稳定流程组织模型能力，在审核效率、判断一致性与人工责任之间建立清晰边界。</p></div>
         <div class="principle-list">
           <article><h3>视觉证据优先</h3><p>先从图片本身提取内容证据，保持判断与原始材料之间的联系。</p></article>
-          <article><h3>工具按需调用</h3><p>只有需要读取文字或核对规则时，智能体才调用 OCR 与轻量检索。</p></article>
-          <article><h3>人工保留最终判断</h3><p>系统输出辅助建议与审核编号，不替代运营人员作出最终决定。</p></article>
+          <article><h3>条件式补充取证</h3><p>文字识别、规则检索与视觉复核只在预设条件满足时触发，兼顾效率与一致性。</p></article>
+          <article><h3>人工闭环可追溯</h3><p>关键冲突进入人工复核，确认与调整结果持续留痕，并支持后续再次修正。</p></article>
         </div>
       </section>
 
       <section id="workflow" class="landing-section workflow-section" aria-labelledby="workflowTitle">
-        <div class="section-intro"><span>REVIEW WORKFLOW</span><h2 id="workflowTitle">一次审核请求如何完成</h2><p>每张图片独立处理；上一张图片和结果不会成为下一次请求的上下文。</p></div>
+        <div class="section-intro"><span>REVIEW WORKFLOW</span><h2 id="workflowTitle">一次审核请求如何完成</h2><p>每张图片独立处理，固定流程根据证据条件逐步展开，关键处置由程序策略完成。</p></div>
         <ol class="workflow-list">
           <li class="is-human"><span>01</span><div><h3>提交图片</h3><p>从本地选择、拖入工作区或直接粘贴截图。</p></div></li>
           <li><span>02</span><div><h3>提取视觉证据</h3><p>FG-CLIP2 对图片内容进行基础视觉分析。</p></div></li>
-          <li><span>03</span><div><h3>判断取证需求</h3><p>智能体判断是否需要识别文字或检索相关规则。</p></div></li>
-          <li><span>04</span><div><h3>综合多源证据</h3><p>整理视觉、文字与规则片段，形成可复核的依据。</p></div></li>
-          <li><span>05</span><div><h3>生成审核建议</h3><p>返回处理建议与可追溯审核编号。</p></div></li>
-          <li class="is-human"><span>06</span><div><h3>人工复核</h3><p>运营人员结合实际业务规则确认最终结论。</p></div></li>
+          <li><span>03</span><div><h3>条件式补充取证</h3><p>根据图片类型与基础证据，按需执行 OCR、规则检索或视觉复核。</p></div></li>
+          <li><span>04</span><div><h3>统一证据裁决</h3><p>程序策略收敛多源证据，识别真正的风险冲突与安全语境。</p></div></li>
+          <li><span>05</span><div><h3>输出处置结果</h3><p>返回放行、限流、复核或下架结果，并保留完整审核编号。</p></div></li>
+          <li class="is-human"><span>06</span><div><h3>人工闭环</h3><p>运营人员可确认或调整结果，人工处置持续保存并支持再次修正。</p></div></li>
         </ol>
         <p class="workflow-note"><strong>轻量 RAG：</strong>当前规则知识规模较小，采用轻量检索减少部署复杂度，并为后续扩展保留接口。</p>
       </section>
@@ -78,25 +79,25 @@
       <section id="boundaries" class="landing-section boundary-section" aria-labelledby="boundaryTitle">
         <div class="section-intro"><span>DATA BOUNDARIES</span><h2 id="boundaryTitle">能力分层，数据流向明确</h2><p>组件职责以数据边界划分，而不是把所有能力堆叠在一次模型调用里。</p></div>
         <div class="boundary-map">
-          <article><span class="boundary-label">浏览器</span><h3>审核工作台</h3><p>保存当前页面中的工作区、图片预览和审核结果。</p><small>刷新或关闭后清空</small></article>
+          <article><span class="boundary-label">浏览器</span><h3>审核工作台</h3><p>工作区分组与当前页面时间线按会话保留，审核队列从后端同步。</p><small>页面视图 · 审核记录持久化</small></article>
           <div class="boundary-arrow" aria-hidden="true"><span>图片</span>→</div>
-          <article class="boundary-core"><span class="boundary-label">审核后端</span><h3>视觉分析与智能体</h3><p>FG-CLIP2 提取证据，Agent 组织工具调用，轻量 RAG 检索规则。</p><small>统一生成建议与编号</small></article>
+          <article class="boundary-core"><span class="boundary-label">审核后端</span><h3>视觉模型与固定工作流</h3><p>FG-CLIP2 形成视觉证据，程序按条件编排专项模型、OCR、RAG 与策略裁决。</p><small>确定性流程 · 统一生成编号</small></article>
           <div class="boundary-arrow" aria-hidden="true"><span>按需</span>→</div>
-          <article><span class="boundary-label">外部能力</span><h3>OCR 与大语言模型</h3><p>GLM-OCR 在需要时处理图片；DeepSeek 仅接收整理后的文本证据。</p><small>不保存前端工作区结构</small></article>
+          <article><span class="boundary-label">条件式能力</span><h3>OCR 与受控视觉复核</h3><p>仅在证据链需要时启用本地 OCR、规则检索和虚拟内容视觉复核。</p><small>按条件触发 · 不扩张权限</small></article>
         </div>
       </section>
 
       <section id="usage" class="landing-section usage-section" aria-labelledby="usageTitle">
         <div class="section-intro"><span>HOW TO USE</span><h2 id="usageTitle">从图片到建议，只需一次提交</h2></div>
         <div class="usage-line" aria-label="使用步骤"><strong>选择工作区</strong><span>→</span><strong>拖入或粘贴图片</strong><span>→</span><strong>查看建议并继续审核</strong></div>
-        <p class="usage-meta">支持 JPG、PNG、WEBP · 单张不超过 10MB · 每张图片独立审核 · 页面记录刷新后清空</p>
+        <p class="usage-meta">支持 JPG、PNG、WEBP · 单张不超过 10MB · 每张图片独立审核 · 工作区视图按页面保留，审核队列持久化</p>
       </section>
 
-      <aside class="limitations" aria-label="系统边界说明"><strong>系统边界</strong><p>当前规则库规模较小，采用轻量检索实现。系统不自动判定最终风险等级，审核建议需要结合业务规则进行人工复核。</p></aside>
+      <aside class="limitations" aria-label="系统边界说明"><strong>系统边界</strong><p>系统依据固定策略自动给出处置结果，高风险冲突进入人工复核。人工确认与调整会持久化沉淀，为后续审核优化提供可靠依据。</p></aside>
 
       <section class="landing-final" aria-labelledby="finalTitle"><span>IMAGEGUARD WORKSPACE</span><h2 id="finalTitle"><span>开始一次清晰、可追溯的</span><span>图片审核</span></h2><a href="#workspace">进入图片审核工作台</a></section>
     </main>
-    <footer class="landing-footer"><span>ImageGuard · 多模态图片内容审核</span><span>辅助审核 · 人工复核 · 结果可追溯</span></footer>
+    <footer class="landing-footer"><span>ImageGuard · 多模态图片内容审核</span><span>本地证据 · 固定裁决 · 人工闭环</span></footer>
   </div>
 
   <div id="workspaceApp" class="app-layout" hidden inert>
@@ -106,10 +107,33 @@
       <div class="history-heading"><h2 title="可切换的图片审核分组，每组有自己的图片和结果">工作区</h2><span id="groupCount">1</span></div>
       <nav id="groupList" class="group-list" aria-label="工作区列表"></nav>
       <div id="groupMenu" class="group-menu" role="menu" aria-label="工作区操作" hidden><button id="menuRename" type="button" role="menuitem">重命名</button><button id="menuDelete" type="button" role="menuitem">删除工作区</button></div>
+      <section class="queue-panel" aria-labelledby="queueTitle">
+        <div class="queue-title-row"><div><span class="queue-eyebrow">PERSISTENT QUEUE</span><h2 id="queueTitle">审核队列</h2></div><div class="queue-title-actions"><button id="clearQueue" class="queue-clear" type="button" disabled>清空队列</button><a id="exportQueue" class="queue-export" href="./api/records/export.csv" download>导出 CSV</a></div></div>
+        <div class="queue-filters">
+          <label><span>域</span><select id="queueDomain"><option value="">全部</option><option value="real">真实</option><option value="virtual">虚拟</option></select></label>
+          <label><span>动作</span><select id="queueAction"><option value="">全部</option><option value="allow">放行</option><option value="limit">限流</option><option value="review">人工复核</option><option value="block">下架</option></select></label>
+          <label><span>风险</span><select id="queueRisk"><option value="">全部</option><option value="L0_安全">L0</option><option value="L1_轻微违规">L1</option><option value="L2_中度违规">L2</option><option value="L3_严重违规">L3</option><option value="X_无法判定">X</option></select></label>
+        </div>
+        <div class="queue-section">
+          <div class="queue-section-heading"><h3>自动审查区</h3><span id="autoQueueCount">0</span></div>
+          <div id="autoQueue" class="queue-list"></div>
+        </div>
+        <div class="queue-section queue-completed">
+          <div class="queue-section-heading"><h3>已完成区</h3><span id="humanQueueCount">0</span></div>
+          <div class="queue-subsection">
+            <div class="queue-subheading"><h4>通过队列</h4><span id="confirmedQueueCount">0</span></div>
+            <div id="confirmedQueue" class="queue-list"></div>
+          </div>
+          <div class="queue-subsection">
+            <div class="queue-subheading"><h4>调整队列</h4><span id="adjustedQueueCount">0</span></div>
+            <div id="adjustedQueue" class="queue-list"></div>
+          </div>
+        </div>
+      </section>
       <div class="history-heading"><h2 title="当前选中工作区内已提交的图片及审核结果">当前工作区的审核记录</h2><span id="historyCount" title="当前工作区已提交的图片张数">0</span></div>
       <nav id="historyList" class="history-list" aria-label="审核记录"></nav>
-      <p id="historyEmpty" class="history-empty">提交的图片会出现在这里。</p>
-      <div class="sidebar-footer"><button id="clearHistory" class="text-button" type="button" disabled title="只清空当前工作区的图片和结果；其他工作区保留">清空当前工作区记录</button><p>所有工作区仅在本页面保留，刷新或关闭后清空。</p></div>
+      <p id="historyEmpty" class="history-empty">本页提交的图片会显示在这里；持久化记录请查看上方审核队列。</p>
+      <div class="sidebar-footer"><button id="clearHistory" class="text-button" type="button" disabled title="只清空当前页面工作区中的图片与结果，不删除持久化审核队列">清空页面工作区记录</button><p>工作区列表保存在本机浏览器；页面时间线按当前会话保留，审核队列与人工结果持久化到后端。</p></div>
     </aside>
     <button id="sidebarBackdrop" class="sidebar-backdrop" aria-label="收起侧栏" hidden></button>
     <main class="workspace">
@@ -135,7 +159,7 @@
         <div id="timeline" class="timeline"></div>
       </section>
       <footer class="composer-container">
-        <div id="dropZone" class="composer" aria-label="图片提交区"><div id="pendingFile" class="pending-file" hidden><img id="pendingPreview" alt="待提交图片预览"><div><strong id="pendingName"></strong><span id="pendingMeta"></span></div><button id="removeFile" class="icon-button" aria-label="移除待提交图片">×</button></div><div class="composer-row"><input id="fileInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp"><button id="chooseButton" class="choose-button" type="button"><span aria-hidden="true">＋</span> 选择图片</button><span id="composerHint">或拖拽图片到这里</span><button id="submitButton" class="primary-button" disabled>开始审核 ↑</button></div></div>
+        <div id="dropZone" class="composer" aria-label="图片提交区"><div id="pendingFile" class="pending-file" hidden><img id="pendingPreview" alt="待提交图片预览"><div><strong id="pendingName"></strong><span id="pendingMeta"></span></div><button id="removeFile" class="icon-button" aria-label="移除待提交图片">×</button></div><div class="composer-row"><input id="fileInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp"><input id="folderInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" webkitdirectory multiple><button id="chooseButton" class="choose-button" type="button"><span aria-hidden="true">＋</span> 选择图片</button><button id="folderButton" class="choose-button" type="button">导入文件夹</button><span id="composerHint">或拖拽图片到这里</span><button id="submitButton" class="primary-button" disabled>开始审核 ↑</button></div></div>
         <p id="localError" class="local-error" role="alert" hidden></p>
         <div class="composer-footer"><div id="serviceStatus" class="service-status" role="status" title="显示后端连接状态；模拟模式的结果不代表真实模型效果"><span class="status-dot" aria-hidden="true"></span><span id="serviceText">正在连接服务</span><button id="healthRetry" class="text-button" hidden>重试</button></div><p class="composer-note">支持拖入或粘贴图片 · 审核建议仅供参考</p></div>
       </footer>
@@ -144,7 +168,9 @@
 
   <dialog id="renameDialog" class="rename-dialog" aria-labelledby="renameTitle" aria-describedby="renameHelp"><form id="renameForm"><div class="dialog-heading"><div><span class="dialog-eyebrow">工作区设置</span><h2 id="renameTitle">重命名工作区</h2><p id="renameHelp">使用简短、易于识别的名称。</p></div><button id="closeRename" type="button" class="dialog-close" aria-label="关闭重命名窗口">×</button></div><label class="sr-only" for="workspaceName">工作区名称</label><input id="workspaceName" name="workspaceName" type="text" maxlength="32" autocomplete="off" required><div class="dialog-actions"><button id="cancelRename" class="dialog-cancel" type="button">取消</button><button class="dialog-save" type="submit">保存名称</button></div></form></dialog>
   <dialog id="deleteDialog" class="confirm-dialog" aria-labelledby="deleteTitle" aria-describedby="deleteQuestion"><form id="deleteForm"><div class="dialog-heading"><div><span class="dialog-eyebrow is-danger">不可撤销</span><h2 id="deleteTitle">删除工作区</h2><p id="deleteQuestion"></p></div><button id="closeDelete" type="button" class="dialog-close" aria-label="关闭删除窗口">×</button></div><div class="dialog-actions"><button id="cancelDelete" class="dialog-cancel" type="button">取消</button><button id="confirmDelete" class="dialog-danger" type="submit">删除工作区</button></div></form></dialog>
-  <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpTitle" aria-describedby="helpSummary"><div class="help-dialog-inner"><div class="dialog-heading"><div><span class="dialog-eyebrow">使用说明</span><h2 id="helpTitle">图片审核工作台</h2></div><button id="closeHelp" type="button" class="dialog-close" aria-label="关闭使用说明">×</button></div><p id="helpSummary" class="help-summary">每张图片独立分析，不携带上一张图片的上下文。你可以连续提交图片，并在左侧工作区查看已有结果。</p><dl class="help-details"><div><dt>视觉分析</dt><dd>FG-CLIP2 分析图片内容，审核智能体按需调用文字识别与规则检索。</dd></div><div><dt>数据流向</dt><dd>图片提交至审核后端；DeepSeek 仅接收整理后的文本证据。</dd></div><div><dt>人工复核</dt><dd>系统输出仅作为辅助建议，最终判断仍需由运营人员确认。</dd></div></dl><div class="dialog-actions"><button id="dismissHelp" class="dialog-cancel" type="button">关闭</button><a id="helpLearnMore" class="dialog-primary" href="#home">查看项目详细介绍</a></div></div></dialog>
+  <dialog id="clearQueueDialog" class="confirm-dialog" aria-labelledby="clearQueueTitle" aria-describedby="clearQueueQuestion"><form id="clearQueueForm"><div class="dialog-heading"><div><span class="dialog-eyebrow is-danger">持久化数据</span><h2 id="clearQueueTitle">清空当前工作区队列</h2><p id="clearQueueQuestion">将删除当前工作区的持久化审核记录及对应审计原图。当前页面中的工作区时间线不会随之清空。</p></div><button id="closeClearQueue" type="button" class="dialog-close" aria-label="关闭清空队列窗口">×</button></div><div class="dialog-actions"><button id="cancelClearQueue" class="dialog-cancel" type="button">取消</button><button class="dialog-danger" type="submit">确认清空队列</button></div></form></dialog>
+  <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpTitle" aria-describedby="helpSummary"><div class="help-dialog-inner"><div class="dialog-heading"><div><span class="dialog-eyebrow">使用说明</span><h2 id="helpTitle">图片审核工作台</h2></div><button id="closeHelp" type="button" class="dialog-close" aria-label="关闭使用说明">×</button></div><p id="helpSummary" class="help-summary">ImageGuard 以固定工作流组织视觉模型、条件式工具与程序裁决，为每张图片生成清晰、可追溯的处置结果。</p><dl class="help-details"><div><dt>证据链</dt><dd>FG-CLIP2 与专项模型形成基础证据；OCR、规则检索和虚拟内容复核仅在条件满足时触发。</dd></div><div><dt>处置逻辑</dt><dd>程序依据固定策略完成风险收敛与最终裁决，高风险冲突保留人工复核。</dd></div><div><dt>人工闭环</dt><dd>确认后进入通过队列，调整后进入调整队列；人工结果持久化保存，并支持再次修正。</dd></div></dl><div class="dialog-actions"><button id="dismissHelp" class="dialog-cancel" type="button">关闭</button><a id="helpLearnMore" class="dialog-primary" href="#home">查看项目概览</a></div></div></dialog>
+  <dialog id="feedbackDialog" class="feedback-dialog" aria-labelledby="feedbackTitle"><form id="feedbackForm"><div class="dialog-heading"><div><span class="dialog-eyebrow" id="feedbackEyebrow">人工处理</span><h2 id="feedbackTitle">调整审核结果</h2><p id="feedbackHelp">处理结果会进入已完成，并写入 SQLite 历史记录。</p></div><button id="closeFeedback" type="button" class="dialog-close" aria-label="关闭人工处理窗口">×</button></div><label class="feedback-field"><span>处理方式</span><select id="feedbackResolution"><option value="confirm">确认系统建议</option><option value="adjust">调整最终动作</option></select></label><fieldset id="feedbackDirection" class="feedback-field feedback-direction-field"><legend>调整方向</legend><div class="direction-options"><label class="direction-option"><input id="feedbackDirectionDowngrade" type="radio" name="feedbackDirection" value="downgrade"><span><strong>降级</strong><small>放宽到更轻的处置</small></span></label><label class="direction-option"><input id="feedbackDirectionUpgrade" type="radio" name="feedbackDirection" value="upgrade"><span><strong>升级</strong><small>收紧到更重的处置</small></span></label></div></fieldset><label class="feedback-field"><span>最终动作</span><select id="feedbackAction"><option value="allow">L0 · 放行</option><option value="limit">L1 · 限流</option><option value="review">L2 · 人工复核</option><option value="block">L3 · 下架</option></select></label><label class="feedback-field"><span>反馈原因</span><textarea id="feedbackReason" rows="4" maxlength="1000" placeholder="确认建议可留空；调整时必须填写。"></textarea></label><div class="dialog-actions"><button id="cancelFeedback" type="button" class="dialog-cancel">取消</button><button class="dialog-save" type="submit">保存处理结果</button></div></form></dialog>
   <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
   <div id="toast" class="toast" role="status" hidden></div>
 </body>

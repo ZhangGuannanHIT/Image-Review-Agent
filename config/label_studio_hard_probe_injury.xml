@@ -1,0 +1,9 @@
+<View>
+  <Image name="img" value="$image"/>
+  <Header value="仅标注可见血腥程度"/>
+  <Choices name="injury_detail" toName="img" choice="single" required="true">
+    <Choice value="轻微（微量血迹/淤青）"/>
+    <Choice value="中度（明显开放性伤口/大量血泊）"/>
+    <Choice value="严重（器官/骨骼暴露/分尸）"/>
+  </Choices>
+</View>
